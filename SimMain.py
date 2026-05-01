@@ -26,6 +26,7 @@ class RectangleLightSail():
         Torque = np.array([0, 0, 0])
         
         for i in range(self.width):
+            y = self.StartingY
             for j in range(self.height):
                 r = np.sqrt(x**2 + y**2)
                 I = I0 * np.exp(-2 * r**2 / w0**2)
