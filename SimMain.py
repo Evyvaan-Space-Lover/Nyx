@@ -10,10 +10,11 @@ w0 = 1.0
 
 
 class RectangleLightSail():
-    def __init__(self, width, height, StartingX, StartingY):
+    def __init__(self, width, height, resolution, StartingX, StartingY):
         
-        self.width = width * 100
-        self.height = height * 100
+        self.width = width
+        self.height = height
+        self.resolution = resolution
         self.StartingX = StartingX
         self.StartingY = StartingY
 
@@ -25,6 +26,10 @@ class RectangleLightSail():
         Force = np.array([0, 0, 0])
         Torque = np.array([0, 0, 0])
         
+        dx = self.width / self.resolution
+        dy = self.height / self.resolution
+        
+        dA = dx * dy
         for i in range(self.width):
             y = self.StartingY
             for j in range(self.height):
@@ -33,18 +38,18 @@ class RectangleLightSail():
                 position = np.array([x, y, 0])
                 
                 normal = np.array([0, 0, 1])
-                F = I * normal
+                F = I * dA * normal
                 
                 tau = np.cross(position, F)
                 
                 Force = Force + F
                 Torque = Torque + tau
                 
-                y += 1
-            x += 1
+                y += dy
+            x += dx
         return Force, Torque
 
-nyx1 = RectangleLightSail(10, 10, -5, -5)
+nyx1 = RectangleLightSail(10, 10, 50, -5, -5)
 TotalForce, TotalTorque = nyx1.compute()
 
 print(f"total force is {TotalForce} \n total torque is {TotalTorque}")
