@@ -49,7 +49,12 @@ class RectangleLightSail():
             x += dx
         return Force, Torque
 
-nyx1 = RectangleLightSail(10, 10, 50, -5, -5)
-TotalForce, TotalTorque = nyx1.compute()
+nyxRect1 = RectangleLightSail(10, 10, 50, -5, -5)
+nyxRect2 = RectangleLightSail(10, 10, 50, -3, -5) #Different test case. The sail is placed assymtrically, relativaly to the centre is also close to the centre.
 
-print(f"total force is {TotalForce} \n total torque is {TotalTorque}")
+TotalForce, TotalTorque = nyxRect1.compute()
+
+print(f"Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+
+TotalForce, TotalTorque = nyxRect2.compute()
+print(f"Test Case 2: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque}")
