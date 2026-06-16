@@ -2,12 +2,32 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-I0 = 1.5 #The Intensity at The Exact Center of the Beam. This is a constant for the simulation, and can be changed to test different scenarios.
+c = 3e8 #The Speed of Light in m/s. This is a constant for the simulation, and can be changed to test different scenarios.
+
+I0 = 1e9 #The Intensity at The Exact Center of the Beam. This is a constant for the simulation, and can be changed to test different scenarios.
 w0 = 1.0 #The beam waist, which is the radius at which the intensity falls to 1/e^2 of its maximum value. This is also a constant for the simulation, and can be changed to test different scenarios.
 
 #Gaussian Beam Equation: I(r) = I0 * exp(-2 * r^2 / w0^2), How the intensity of the beam changes with distance from the center. This is a fundamental equation for simulating the interaction of light with the sail, and is used to calculate the force and torque on each element of the sail based on its position relative to the center of the beam.
 def gaussian(r):
     return I0 * np.exp(-2 * r**2 / w0**2)
+
+def rotateX(vector, angle):
+    x, y, z = vector 
+    
+    return np.array([
+        x,
+        y*np.cos(angle) - z*np.sin(angle),
+        y*np.sin(angle) + z*np.cos(angle)
+    ])
+
+def rotateY(vector, angle):
+    x, y, z = vector
+    
+    return np.array([
+        x*np.cos(angle) + z*np.sin(angle),
+        y,
+        -x*np.sin(angle) + z*np.cos(angle)
+    ])
 
 class RectangleLightSail():
     def __init__(self, width, height, resolution, StartingX=0, StartingY=0, ThetaX=0, ThetaY=0):
@@ -18,8 +38,20 @@ class RectangleLightSail():
         self.CenterY = StartingY
         self.thetaX = ThetaX
         self.thetaY = ThetaY
+        self.Force = None
+        self.Torque = None
+        self.xPoints=[]
+        self.yPoints=[]
+        self.zPoints=[]
+        self.intensities = []
+        self.forceVectors = []
 
     def compute(self):
+        self.xPoints=[]
+        self.yPoints=[]
+        self.zPoints=[]
+        self.intensities = []
+        
         x = self.CenterX
         y = self.CenterY
         
@@ -36,33 +68,86 @@ class RectangleLightSail():
                 x = (self.CenterX - self.width / 2) + (i+0.5) * dx
                 y = (self.CenterY - self.height / 2) + (j+0.5) * dy
                 
-                r = np.sqrt(x**2 + y**2)
-                I = gaussian(r)
                 position = np.array([x, y, 0.0])
                 
+                position = rotateX(position, self.thetaX)
+                position = rotateY(position, self.thetaY)
+                
+                r = np.sqrt(position[0]**2 + position[1]**2)
+                I = gaussian(r)
+                
+                self.xPoints.append(position[0])
+                self.yPoints.append(position[1])
+                self.zPoints.append(position[2])
+                self.intensities.append(I)
+                
                 normal = np.array([np.sin(self.thetaY) * np.cos(self.thetaX), -np.sin(self.thetaX), np.cos(self.thetaX) * np.cos(self.thetaY)])
-                # print(f"Theta_X: {self.thetaX}, Normal Vector: {normal}")
-                F = I * dA * normal
+                
+                cosTheta = np.dot(normal, np.array([0, 0, 1]))
+                
+                if cosTheta > 0:
+                    fmag = (2 *I / 3e8) * (cosTheta**2) * dA
+                    
+                    F = fmag * normal
+                else:
+                    F = np.array([0.0, 0.0, 0.0])
+                
+                self.forceVectors.append(F)
                 
                 tau = np.cross(position, F)
                 
                 Force = Force + F
                 Torque = Torque + tau
-        # print(normal)
+        self.Force = Force
+        self.Torque = Torque
         return Force, Torque
 
+    def Visualize(self):
+        fig = plt.figure()
+        
+        Force, Torque = self.compute()
+        
+        ax = fig.add_subplot(111, projection='3d')
+        scatter = ax.scatter(self.xPoints, self.yPoints, self.zPoints, c=self.intensities, cmap='plasma', s=30)
+        
+        fig.colorbar(scatter, ax=ax, label='Beam Intensity (W/m^2)')
+        
+        ax.quiver(0, 0, 0, Force[0], Force[1], Force[2], color='red', length=2, normalize=True)
+        
+        ax.text2D(
+            0.05, 0.95, f'Total Force: {Force}\nTotal Torque: {Torque}'
+        )
+        
+        ax.set_box_aspect([1,1,1])
+        ax.view_init(elev=30, azim=45)
+        
+        ax.set_xlabel('X axis')
+        ax.set_ylabel('Y axis')
+        ax.set_zlabel('Z axis')
+        
+        plt.show()
+
 class SphereLightSail():
-    def __init__(self, radius, resolution):
+    def __init__(self, radius, resolution, thetaX, thetaY):
         self.radius = radius
         self.resolution = resolution
+        self.thetaX = thetaX
+        self.thetaY = thetaY
+        self.Force = None
+        self.Torque = None
         self.xPoints=[]
         self.yPoints=[]
         self.zPoints=[]
+        self.intensities = []
 
-    def generatePatches(self):
+    def compute(self):
         self.xPoints=[]
         self.yPoints=[]
         self.zPoints=[]
+        
+        Force = np.array([0.0, 0.0, 0.0])
+        Torque = np.array([0.0, 0.0, 0.0])
+        
         for i in range(self.resolution):
             for j in range(self.resolution):
                 
@@ -75,16 +160,50 @@ class SphereLightSail():
                 
                 position = np.array([x, y, z])
                 
-                self.xPoints.append(x)
-                self.yPoints.append(y)
-                self.zPoints.append(z)
+                position = rotateX(position, self.thetaX)
+                position = rotateY(position, self.thetaY)
                 
-                normal = position / self.radius
-            # print(f"Patch {i*self.resolution + j}: \nPosition: {position}, \nNormal: {normal} \n")
-    def VerifySphere(self):
+                self.xPoints.append(position[0])
+                self.yPoints.append(position[1])
+                self.zPoints.append(position[2])
+                
+                normal = position / np.linalg.norm(position)
+                
+                r = np.sqrt(position[0]**2 + position[1]**2)
+                I = gaussian(r)
+                
+                self.intensities.append(I)
+                
+                dtheta = (np.pi / 2) / self.resolution
+                dphi = (2 * np.pi) / self.resolution
+                
+                dA = self.radius**2 * np.sin(theta) * dtheta * dphi
+                
+                # F = I * dA * normal
+                
+                cosTheta = np.dot(normal, np.array([0, 0, 1]))
+                
+                if cosTheta > 0:
+                    fmag = (2 *I / c) * (cosTheta**2) * dA
+                    
+                    F = fmag * normal
+                else:
+                    continue
+                
+                tau = np.cross(position, F)
+                
+                Force = Force + F
+                Torque = Torque + tau
+        self.Force = Force
+        self.Torque = Torque
+        return Force, Torque
+        
+    def Visualize(self):
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
-        ax.scatter(self.xPoints, self.yPoints, self.zPoints)
+        scatter = ax.scatter(self.xPoints, self.yPoints, self.zPoints, c=self.intensities, cmap='plasma', s=30)
+        
+        fig.colorbar(scatter, ax=ax, label='Beam Intensity (W/m^2)')
         
         ax.set_xlabel('X axis')
         ax.set_ylabel('Y axis')
@@ -94,16 +213,31 @@ class SphereLightSail():
 
 
 nyxRect1 = RectangleLightSail(10, 10, 50, 0, 0, np.radians(0), np.radians(0))
-nyxRect2 = RectangleLightSail(10, 10, 50, 0, 0, np.radians(0), np.radians(20))
+nyxRect2 = RectangleLightSail(10, 10, 50, 0, 0, np.radians(20), np.radians(0))
 nyxRect3 = RectangleLightSail(10, 10, 50, 0, 0, np.radians(45), np.radians(0))
-nyxRect4 = RectangleLightSail(10, 10, 50, 0, 0, np.radians(90), np.radians(90))
+nyxRect4 = RectangleLightSail(10, 10, 50, 0, 0, np.radians(90), np.radians(0))
 
-nyxSphere1 = SphereLightSail(1, 50)
-nyxSphere1.generatePatches()
-nyxSphere1.VerifySphere()
+nyxSphere1 = SphereLightSail(1, 100, np.radians(0), np.radians(0))
+nyxSphere2 = SphereLightSail(1, 100, np.radians(30), np.radians(0))
+nyxSphere3 = SphereLightSail(1, 100, np.radians(60), np.radians(0))
 
-# TotalForce, TotalTorque = nyxRect1.compute()
-# print(f"Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+
+TotalForce, TotalTorque = nyxSphere1.compute()
+print(f"Sphere Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+nyxSphere1.Visualize()
+
+# TotalForce, TotalTorque = nyxSphere2.compute()
+# print(f"Sphere Test Case 2: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+# nyxSphere2.Visualize()
+
+# TotalForce, TotalTorque = nyxSphere3.compute()
+# print(f"Sphere Test Case 3: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+# nyxSphere3.Visualize()
+
+
+TotalForce, TotalTorque = nyxRect1.compute()
+print(f"Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+nyxRect1.Visualize()
 
 # TotalForce, TotalTorque = nyxRect2.compute()
 # print(f"Test Case 2: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
