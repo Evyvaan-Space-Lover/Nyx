@@ -7,8 +7,13 @@ c = 3e8 #The Speed of Light in m/s. This is a constant for the simulation, and c
 I0 = 1e9 #The Intensity at The Exact Center of the Beam. This is a constant for the simulation, and can be changed to test different scenarios.
 w0 = 1.0 #The beam waist, which is the radius at which the intensity falls to 1/e^2 of its maximum value. This is also a constant for the simulation, and can be changed to test different scenarios.
 
+beamX = 2
+beamY = 2
+
 #Gaussian Beam Equation: I(r) = I0 * exp(-2 * r^2 / w0^2), How the intensity of the beam changes with distance from the center. This is a fundamental equation for simulating the interaction of light with the sail, and is used to calculate the force and torque on each element of the sail based on its position relative to the center of the beam.
-def gaussian(r):
+def gaussian(x, y):
+    r = np.sqrt((x-beamX)**2 + (y-beamY)**2) / w0
+    
     return I0 * np.exp(-2 * r**2 / w0**2)
 
 def rotateX(vector, angle):
@@ -51,6 +56,7 @@ class RectangleLightSail():
         self.yPoints=[]
         self.zPoints=[]
         self.intensities = []
+        self.forceVectors = []
         
         x = self.CenterX
         y = self.CenterY
@@ -74,7 +80,7 @@ class RectangleLightSail():
                 position = rotateY(position, self.thetaY)
                 
                 r = np.sqrt(position[0]**2 + position[1]**2)
-                I = gaussian(r)
+                I = gaussian(position[0], position[1])
                 
                 self.xPoints.append(position[0])
                 self.yPoints.append(position[1])
@@ -112,7 +118,7 @@ class RectangleLightSail():
         
         fig.colorbar(scatter, ax=ax, label='Beam Intensity (W/m^2)')
         
-        ax.quiver(0, 0, 0, Force[0], Force[1], Force[2], color='red', length=2, normalize=True)
+        ax.quiver(0, 0, 0, Force[0], Force[1], Force[2], color='red', length=2, normalize=False)
         
         ax.text2D(
             0.05, 0.95, f'Total Force: {Force}\nTotal Torque: {Torque}'
@@ -172,7 +178,7 @@ class SphereLightSail():
                 normal = position / np.linalg.norm(position)
                 
                 r = np.sqrt(position[0]**2 + position[1]**2)
-                I = gaussian(r)
+                I = gaussian(position[0], position[1])
                 
                 self.intensities.append(I)
                 
@@ -207,7 +213,7 @@ class SphereLightSail():
         
         fig.colorbar(scatter, ax=ax, label='Beam Intensity (W/m^2)')
         
-        ax.quiver(0, 0, 0, self.Force[0], self.Force[1], self.Force[2], color='red', length=2, normalize=True)
+        ax.quiver(0, 0, 0, self.Force[0], self.Force[1], self.Force[2], color='red', length=2, normalize=False)
         
         ax.set_box_aspect([1,1,1])
         ax.view_init(elev=30, azim=45)
@@ -251,9 +257,9 @@ class ParaboloidLightSail(): #Paraboloid Reflector
                 x = r * np.cos(phi)
                 y = r * np.sin(phi)
                 
-                z = -self.a * (self.radius**2 - r**2)
+                z = self.a * (self.radius**2 - r**2)
                 
-                normal = np.array([2 * self.a * x, 2 * self.a * y, 1.0])
+                normal = np.array([-2 * self.a * x, -2 * self.a * y, 1.0])
                 normal = normal / np.linalg.norm(normal)
                 
                 normal = rotateX(normal, self.thetaX)
@@ -270,7 +276,7 @@ class ParaboloidLightSail(): #Paraboloid Reflector
                 
                 beam = np.sqrt(position[0]**2+position[1]**2)
                 
-                I = gaussian(beam)
+                I = gaussian(position[0], position[1])
                 
                 dr = self.radius / self.resolution
                 dphi = 2 * np.pi / self.resolution
@@ -288,8 +294,8 @@ class ParaboloidLightSail(): #Paraboloid Reflector
                 
                 tau = np.cross(position, F)
                 
-                Force =+ F
-                Torque =+ tau
+                Force += F
+                Torque += tau
                 
                 self.intensities.append(I)
         self.Force=Force
@@ -304,7 +310,7 @@ class ParaboloidLightSail(): #Paraboloid Reflector
         
         fig.colorbar(scatter, ax=ax, label='Beam Intensity (W/m^2)')
         
-        ax.quiver(0, 0, 0, self.Force[0], self.Force[1], self.Force[2], color='red', length=2, normalize=True)
+        ax.quiver(0, 0, 0, self.Force[0], self.Force[1], self.Force[2], color='red', normalize=True)
         
         ax.set_box_aspect([1,1,1])
         ax.view_init(elev=30, azim=45)
@@ -326,15 +332,15 @@ nyxSphere1 = SphereLightSail(1, 100, np.radians(0), np.radians(0))
 nyxSphere2 = SphereLightSail(1, 100, np.radians(30), np.radians(0))
 nyxSphere3 = SphereLightSail(1, 100, np.radians(60), np.radians(0))
 
-nyxParaboloid1 = ParaboloidLightSail(1, 0.5, 100, 0, 0)
+nyxParaboloid1 = ParaboloidLightSail(1, 0.5, 100, np.radians(0), np.radians(0))
 
 TotalForce, TotalTorque = nyxParaboloid1.compute()
 print(f"Paraboloid Reflector Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
 nyxParaboloid1.Visualize()
 
-# TotalForce, TotalTorque = nyxSphere1.compute()
-# print(f"Sphere Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
-# nyxSphere1.Visualize()
+TotalForce, TotalTorque = nyxSphere1.compute()
+print(f"Sphere Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+nyxSphere1.Visualize()
 
 # TotalForce, TotalTorque = nyxSphere2.compute()
 # print(f"Sphere Test Case 2: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
@@ -345,9 +351,9 @@ nyxParaboloid1.Visualize()
 # nyxSphere3.Visualize()
 
 
-# TotalForce, TotalTorque = nyxRect1.compute()
-# print(f"Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
-# nyxRect1.Visualize()
+TotalForce, TotalTorque = nyxRect1.compute()
+print(f"Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+nyxRect1.Visualize()
 
 # TotalForce, TotalTorque = nyxRect2.compute()
 # print(f"Test Case 2: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
