@@ -7,12 +7,13 @@ c = 3e8 #The Speed of Light in m/s. This is a constant for the simulation, and c
 I0 = 1e9 #The Intensity at The Exact Center of the Beam. This is a constant for the simulation, and can be changed to test different scenarios.
 w0 = 1.0 #The beam waist, which is the radius at which the intensity falls to 1/e^2 of its maximum value. This is also a constant for the simulation, and can be changed to test different scenarios.
 
-beamX = 2
-beamY = 2
+beamX = 0
+beamY = 0
+beamDih = np.array([0.0, 0.0, 1.0]) #Beam direction, i thought it would be funny to name it "Beam Dih"
 
 #Gaussian Beam Equation: I(r) = I0 * exp(-2 * r^2 / w0^2), How the intensity of the beam changes with distance from the center. This is a fundamental equation for simulating the interaction of light with the sail, and is used to calculate the force and torque on each element of the sail based on its position relative to the center of the beam.
 def gaussian(x, y):
-    r = np.sqrt((x-beamX)**2 + (y-beamY)**2) / w0
+    r = np.sqrt((x-beamX)**2 + (y-beamY)**2)
     
     return I0 * np.exp(-2 * r**2 / w0**2)
 
@@ -33,6 +34,16 @@ def rotateY(vector, angle):
         y,
         -x*np.sin(angle) + z*np.cos(angle)
     ])
+
+def calcForce(I, normal, dA):
+    cosTheta = np.dot(normal, beamDih)
+    if cosTheta > 1e-10:
+        fmag = (I / c) * cosTheta * dA
+        F = -fmag * (beamDih - 2*cosTheta*normal)
+    else:
+        F = np.array([0.0, 0.0, 0.0])
+    
+    return F
 
 class RectangleLightSail():
     def __init__(self, width, height, resolution, StartingX=0, StartingY=0, ThetaX=0, ThetaY=0):
@@ -89,14 +100,7 @@ class RectangleLightSail():
                 
                 normal = np.array([np.sin(self.thetaY) * np.cos(self.thetaX), -np.sin(self.thetaX), np.cos(self.thetaX) * np.cos(self.thetaY)])
                 
-                cosTheta = np.dot(normal, np.array([0, 0, 1]))
-                
-                if cosTheta > 0:
-                    fmag = (2 *I / 3e8) * (cosTheta**2) * dA
-                    
-                    F = fmag * normal
-                else:
-                    F = np.array([0.0, 0.0, 0.0])
+                F = calcForce(I, normal, dA)
                 
                 self.forceVectors.append(F)
                 
@@ -118,11 +122,10 @@ class RectangleLightSail():
         
         fig.colorbar(scatter, ax=ax, label='Beam Intensity (W/m^2)')
         
-        ax.quiver(0, 0, 0, Force[0], Force[1], Force[2], color='red', length=2, normalize=False)
+        ax.quiver(0, 0, 0, Force[0], Force[1], Force[2], color='red', length=2, normalize=True)
         
         ax.text2D(
-            0.05, 0.95, f'Total Force: {Force}\nTotal Torque: {Torque}'
-        )
+            0.05, 0.95, f'Total Force: {Force}\nTotal Torque: {Torque}')
         
         ax.set_box_aspect([1,1,1])
         ax.view_init(elev=30, azim=45)
@@ -187,16 +190,7 @@ class SphereLightSail():
                 
                 dA = self.radius**2 * np.sin(theta) * dtheta * dphi
                 
-                # F = I * dA * normal
-                
-                cosTheta = np.dot(normal, np.array([0, 0, 1]))
-                
-                if cosTheta > 0:
-                    fmag = (2 *I / c) * (cosTheta**2) * dA
-                    
-                    F = fmag * normal
-                else:
-                    continue
+                F = calcForce(I, normal, dA)
                 
                 tau = np.cross(position, F)
                 
@@ -213,7 +207,7 @@ class SphereLightSail():
         
         fig.colorbar(scatter, ax=ax, label='Beam Intensity (W/m^2)')
         
-        ax.quiver(0, 0, 0, self.Force[0], self.Force[1], self.Force[2], color='red', length=2, normalize=False)
+        ax.quiver(0, 0, 0, self.Force[0], self.Force[1], self.Force[2], color='red', length=2, normalize=True)
         
         ax.set_box_aspect([1,1,1])
         ax.view_init(elev=30, azim=45)
@@ -274,23 +268,14 @@ class ParaboloidLightSail(): #Paraboloid Reflector
                 self.yPoints.append(position[1])
                 self.zPoints.append(position[2])
                 
-                beam = np.sqrt(position[0]**2+position[1]**2)
-                
                 I = gaussian(position[0], position[1])
                 
                 dr = self.radius / self.resolution
                 dphi = 2 * np.pi / self.resolution
                 
-                dA = r * dr * dphi
+                dA = np.sqrt(1 + (2*self.a*position[0])**2 + (2*self.a*position[1])**2) * r * dr * dphi
                 
-                cosTheta = np.dot(normal, np.array([0, 0, 1]))
-                
-                if cosTheta > 0:
-                    fmag = (2 *I / c) * (cosTheta**2) * dA
-                    
-                    F = fmag * normal
-                else:
-                    continue
+                F = calcForce(I, normal, dA)
                 
                 tau = np.cross(position, F)
                 
@@ -310,7 +295,7 @@ class ParaboloidLightSail(): #Paraboloid Reflector
         
         fig.colorbar(scatter, ax=ax, label='Beam Intensity (W/m^2)')
         
-        ax.quiver(0, 0, 0, self.Force[0], self.Force[1], self.Force[2], color='red', normalize=True)
+        ax.quiver(0, 0, 0, self.Force[0], self.Force[1], self.Force[2], color='red',length=2, normalize=True)
         
         ax.set_box_aspect([1,1,1])
         ax.view_init(elev=30, azim=45)
@@ -323,16 +308,19 @@ class ParaboloidLightSail(): #Paraboloid Reflector
         
         plt.show()
 
-nyxRect1 = RectangleLightSail(10, 10, 50, 0, 0, np.radians(0), np.radians(0))
-nyxRect2 = RectangleLightSail(10, 10, 50, 0, 0, np.radians(20), np.radians(0))
-nyxRect3 = RectangleLightSail(10, 10, 50, 0, 0, np.radians(45), np.radians(0))
-nyxRect4 = RectangleLightSail(10, 10, 50, 0, 0, np.radians(90), np.radians(0))
+
+nyxRect1 = RectangleLightSail(10, 10, 100, 0, 0, np.radians(0), np.radians(0))
+nyxRect2 = RectangleLightSail(10, 10, 100, 0, 0, np.radians(20), np.radians(0))
+nyxRect3 = RectangleLightSail(10, 10, 100, 0, 0, np.radians(45), np.radians(0))
+nyxRect4 = RectangleLightSail(10, 10, 100, 0, 0, np.radians(90), np.radians(0))
 
 nyxSphere1 = SphereLightSail(1, 100, np.radians(0), np.radians(0))
 nyxSphere2 = SphereLightSail(1, 100, np.radians(30), np.radians(0))
 nyxSphere3 = SphereLightSail(1, 100, np.radians(60), np.radians(0))
 
 nyxParaboloid1 = ParaboloidLightSail(1, 0.5, 100, np.radians(0), np.radians(0))
+
+nyxDisc1 = ParaboloidLightSail(5, 0, 100, np.radians(0), np.radians(0))
 
 TotalForce, TotalTorque = nyxParaboloid1.compute()
 print(f"Paraboloid Reflector Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
