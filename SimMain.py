@@ -37,8 +37,7 @@ def rotateY(vector, angle):
 def calcForce(I, normal, dA):
     cosTheta = np.dot(normal, beamDih)
     if cosTheta > 1e-10:
-        fmag = (I / c) * cosTheta * dA
-        F = -fmag * (beamDih - 2*cosTheta*normal)
+        F = 2 * (I / c) * (cosTheta ** 2) * dA * normal
     else:
         F = np.array([0.0, 0.0, 0.0])
     
@@ -149,7 +148,7 @@ class RectangleLightSail():
         
         self.positionOffset += (self.velocity * dt)
         self.thetaX += (self.angularVelocity[0] * dt)
-        self.thetaX += (self.angularVelocity[1] * dt)
+        self.thetaY += (self.angularVelocity[1] * dt)
         
         self.history["time"].append(time)
         self.history["position"].append(self.positionOffset.copy())
@@ -166,7 +165,7 @@ class RectangleLightSail():
         Force, Torque = self.compute()
         
         ax = fig.add_subplot(111, projection='3d')
-        positions = np.array([self.history["position"]])
+        positions = np.array(self.history["position"])
         
         ax.plot(positions[:,0], positions[:,1], positions[:,2])
         
@@ -284,12 +283,9 @@ class SphereLightSail():
         self.velocity += (acceleration* dt)
         self.angularVelocity += (self.angularAcceleration * dt)
         
-        self.velocity *= 0.995
-        self.angularVelocity *= 0.995
-        
         self.positionOffset += (self.velocity * dt)
         self.thetaX += (self.angularVelocity[0] * dt)
-        self.thetaX += (self.angularVelocity[1] * dt)
+        self.thetaY += (self.angularVelocity[1] * dt)
         
         self.history["time"].append(time)
         self.history["position"].append(self.positionOffset.copy())
@@ -376,7 +372,7 @@ class ParaboloidLightSail(): #Paraboloid Reflector
                 
                 z = self.a * (self.radius**2 - r**2)
                 
-                normal = np.array([-2 * self.a * x, -2 * self.a * y, 1.0])
+                normal = np.array([2 * self.a * x, 2 * self.a * y, 1.0])
                 normal = normal / np.linalg.norm(normal)
                 
                 normal = rotateX(normal, self.thetaX)
@@ -398,7 +394,7 @@ class ParaboloidLightSail(): #Paraboloid Reflector
                 dr = self.radius / self.resolution
                 dphi = 2 * np.pi / self.resolution
                 
-                dA = np.sqrt(1 + (2*self.a*position[0])**2 + (2*self.a*position[1])**2) * r * dr * dphi
+                dA = np.sqrt(1 + (2*self.a*x)**2 + (2*self.a*y)**2) * r * dr * dphi
                 
                 F = calcForce(I, normal, dA)
                 
@@ -419,12 +415,9 @@ class ParaboloidLightSail(): #Paraboloid Reflector
         self.velocity += (acceleration* dt)
         self.angularVelocity += (self.angularAcceleration * dt)
         
-        self.velocity *= 0.995
-        self.angularVelocity *= 0.995
-        
         self.positionOffset += (self.velocity * dt)
         self.thetaX += (self.angularVelocity[0] * dt)
-        self.thetaX += (self.angularVelocity[1] * dt)
+        self.thetaY += (self.angularVelocity[1] * dt)
         
         self.history["time"].append(time)
         self.history["position"].append(self.positionOffset.copy())
