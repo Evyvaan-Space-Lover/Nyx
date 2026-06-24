@@ -10,6 +10,7 @@ w0 = 1.0 #The beam waist, which is the radius at which the intensity falls to 1/
 beamX = 0
 beamY = 0
 beamDih = np.array([0.0, 0.0, 1.0]) #Beam direction, i thought it would be funny to name it "Beam Dih"
+beamDih = beamDih / np.linalg.norm(beamDih)
 
 #Gaussian Beam Equation: I(r) = I0 * exp(-2 * r^2 / w0^2), How the intensity of the beam changes with distance from the center. This is a fundamental equation for simulating the interaction of light with the sail, and is used to calculate the force and torque on each element of the sail based on its position relative to the center of the beam.
 def gaussian(x, y):
@@ -25,7 +26,6 @@ def rotateX(vector, angle):
         y*np.cos(angle) - z*np.sin(angle),
         y*np.sin(angle) + z*np.cos(angle)
     ])
-
 def rotateY(vector, angle):
     x, y, z = vector
     
@@ -34,7 +34,6 @@ def rotateY(vector, angle):
         y,
         -x*np.sin(angle) + z*np.cos(angle)
     ])
-
 def calcForce(I, normal, dA):
     cosTheta = np.dot(normal, beamDih)
     if cosTheta > 1e-10:
@@ -54,14 +53,37 @@ class RectangleLightSail():
         self.CenterY = StartingY
         self.thetaX = ThetaX
         self.thetaY = ThetaY
+        
+        self.mass = 1.0
+        
+        self.velocity = np.array([0.0, 0.0, 0.0])
+        self.positionOffset = np.array([0.0, 0.0, 0.0])
+        
+        self.angularVelocity = np.array([0.0, 0.0, 0.0])
+        self.angularAcceleration = np.array([0.0, 0.0, 0.0])
+        
+        self.momentOfInertia = 1.0
+        
         self.Force = None
         self.Torque = None
+        
         self.xPoints=[]
         self.yPoints=[]
         self.zPoints=[]
+        
         self.intensities = []
         self.forceVectors = []
-
+        
+        self.history = {
+            "time": [],
+            "position": [],
+            "velocity": [],
+            "force": [],
+            "torque": [],
+            "thetaX": [],
+            "thetaY": [],
+            "angularVelocity": []
+        }
     def compute(self):
         self.xPoints=[]
         self.yPoints=[]
@@ -86,9 +108,11 @@ class RectangleLightSail():
                 y = (self.CenterY - self.height / 2) + (j+0.5) * dy
                 
                 position = np.array([x, y, 0.0])
-                
+
                 position = rotateX(position, self.thetaX)
                 position = rotateY(position, self.thetaY)
+                
+                position += self.positionOffset
                 
                 r = np.sqrt(position[0]**2 + position[1]**2)
                 I = gaussian(position[0], position[1])
@@ -96,6 +120,7 @@ class RectangleLightSail():
                 self.xPoints.append(position[0])
                 self.yPoints.append(position[1])
                 self.zPoints.append(position[2])
+                
                 self.intensities.append(I)
                 
                 normal = np.array([np.sin(self.thetaY) * np.cos(self.thetaX), -np.sin(self.thetaX), np.cos(self.thetaX) * np.cos(self.thetaY)])
@@ -112,20 +137,46 @@ class RectangleLightSail():
         self.Torque = Torque
         return Force, Torque
 
+    def update(self, dt, time):
+        acceleration = (self.Force / self.mass)
+        self.angularAcceleration= (self.Torque / self.momentOfInertia)
+        
+        self.velocity += (acceleration * dt)
+        self.angularVelocity += (self.angularAcceleration * dt)
+        
+        self.velocity *= 0.995 # Dampening, since tiny errors can accumulate and cause problems :3
+        self.angularVelocity *= 0.995
+        
+        self.positionOffset += (self.velocity * dt)
+        self.thetaX += (self.angularVelocity[0] * dt)
+        self.thetaX += (self.angularVelocity[1] * dt)
+        
+        self.history["time"].append(time)
+        self.history["position"].append(self.positionOffset.copy())
+        self.history["velocity"].append(self.velocity.copy())
+        self.history["force"].append(self.Force.copy())
+        self.history["torque"].append(self.Torque.copy())
+        self.history["thetaX"].append(self.thetaX)
+        self.history["thetaY"].append(self.thetaY)
+        self.history["angularVelocity"].append(self.angularVelocity.copy())
+
     def Visualize(self):
         fig = plt.figure()
         
         Force, Torque = self.compute()
         
         ax = fig.add_subplot(111, projection='3d')
+        positions = np.array([self.history["position"]])
+        
+        ax.plot(positions[:,0], positions[:,1], positions[:,2])
+        
         scatter = ax.scatter(self.xPoints, self.yPoints, self.zPoints, c=self.intensities, cmap='plasma', s=30)
         
         fig.colorbar(scatter, ax=ax, label='Beam Intensity (W/m^2)')
         
         ax.quiver(0, 0, 0, Force[0], Force[1], Force[2], color='red', length=2, normalize=True)
         
-        ax.text2D(
-            0.05, 0.95, f'Total Force: {Force}\nTotal Torque: {Torque}')
+        ax.text2D(0.05, 0.95, f'Total Force: {Force}\nTotal Torque: {Torque}')
         
         ax.set_box_aspect([1,1,1])
         ax.view_init(elev=30, azim=45)
@@ -144,12 +195,36 @@ class SphereLightSail():
         self.resolution = resolution
         self.thetaX = thetaX
         self.thetaY = thetaY
+        
+        self.mass = 1.0
+        
+        self.velocity = np.array([0.0, 0.0, 0.0])
+        self.positionOffset = np.array([0.0, 0.0, 0.0])
+        
+        self.angularVelocity = np.array([0.0, 0.0, 0.0])
+        self.angularAcceleration = np.array([0.0, 0.0, 0.0])
+        
+        self.momentOfInertia = 1.0
+        
         self.Force = None
         self.Torque = None
+        
         self.xPoints=[]
         self.yPoints=[]
         self.zPoints=[]
+        
         self.intensities = []
+        
+        self.history = {
+            "time": [],
+            "position": [],
+            "velocity": [],
+            "force": [],
+            "torque": [],
+            "thetaX": [],
+            "thetaY": [],
+            "angularVelocity": []
+        }
 
     def compute(self):
         self.xPoints=[]
@@ -173,6 +248,8 @@ class SphereLightSail():
                 
                 position = rotateX(position, self.thetaX)
                 position = rotateY(position, self.thetaY)
+                
+                position += self.positionOffset
                 
                 self.xPoints.append(position[0])
                 self.yPoints.append(position[1])
@@ -199,7 +276,30 @@ class SphereLightSail():
         self.Force = Force
         self.Torque = Torque
         return Force, Torque
+
+    def update(self, dt, time):
+        acceleration = (self.Force / self.mass)
+        self.angularAcceleration= (self.Torque / self.momentOfInertia)
         
+        self.velocity += (acceleration* dt)
+        self.angularVelocity += (self.angularAcceleration * dt)
+        
+        self.velocity *= 0.995
+        self.angularVelocity *= 0.995
+        
+        self.positionOffset += (self.velocity * dt)
+        self.thetaX += (self.angularVelocity[0] * dt)
+        self.thetaX += (self.angularVelocity[1] * dt)
+        
+        self.history["time"].append(time)
+        self.history["position"].append(self.positionOffset.copy())
+        self.history["velocity"].append(self.velocity.copy())
+        self.history["force"].append(self.Force.copy())
+        self.history["torque"].append(self.Torque.copy())
+        self.history["thetaX"].append(self.thetaX)
+        self.history["thetaY"].append(self.thetaY)
+        self.history["angularVelocity"].append(self.angularVelocity.copy())
+    
     def Visualize(self):
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
@@ -227,12 +327,35 @@ class ParaboloidLightSail(): #Paraboloid Reflector
         self.resolution = resolution
         self.thetaX = thetaX
         self.thetaY = thetaY
+        
+        self.mass = 1.0
+        
+        self.angularVelocity = np.array([0.0, 0.0, 0.0])
+        self.angularAcceleration = np.array([0.0, 0.0, 0.0])
+        
+        self.momentOfInertia = 1.0
+        
+        self.velocity = np.array([0.0, 0.0, 0.0])
+        self.positionOffset = np.array([0.0, 0.0, 0.0])
+        
         self.Force = None
         self.Torque = None
+        
         self.xPoints=[]
         self.yPoints=[]
         self.zPoints=[]
         self.intensities = []
+        
+        self.history = {
+            "time": [],
+            "position": [],
+            "velocity": [],
+            "force": [],    
+            "torque": [],
+            "thetaX": [],
+            "thetaY": [],
+            "angularVelocity": []
+        }
     
     def compute(self):
         self.xPoints=[]
@@ -264,6 +387,8 @@ class ParaboloidLightSail(): #Paraboloid Reflector
                 position = rotateX(position, self.thetaX)
                 position = rotateY(position, self.thetaY)
                 
+                position += self.positionOffset
+                
                 self.xPoints.append(position[0])
                 self.yPoints.append(position[1])
                 self.zPoints.append(position[2])
@@ -286,8 +411,30 @@ class ParaboloidLightSail(): #Paraboloid Reflector
         self.Force=Force
         self.Torque=Torque
         return Force, Torque
+
+    def update(self, dt, time):
+        acceleration = (self.Force / self.mass)
+        self.angularAcceleration= (self.Torque / self.momentOfInertia)
         
-    
+        self.velocity += (acceleration* dt)
+        self.angularVelocity += (self.angularAcceleration * dt)
+        
+        self.velocity *= 0.995
+        self.angularVelocity *= 0.995
+        
+        self.positionOffset += (self.velocity * dt)
+        self.thetaX += (self.angularVelocity[0] * dt)
+        self.thetaX += (self.angularVelocity[1] * dt)
+        
+        self.history["time"].append(time)
+        self.history["position"].append(self.positionOffset.copy())
+        self.history["velocity"].append(self.velocity.copy())
+        self.history["force"].append(self.Force.copy())
+        self.history["torque"].append(self.Torque.copy())
+        self.history["thetaX"].append(self.thetaX)
+        self.history["thetaY"].append(self.thetaY)
+        self.history["angularVelocity"].append(self.angularVelocity.copy())
+
     def Visualize(self):
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
@@ -308,6 +455,20 @@ class ParaboloidLightSail(): #Paraboloid Reflector
         
         plt.show()
 
+def simLoop(timestep, steps, sail):
+    time = 0
+    dt = timestep
+    print("="*90)
+    for step in range(steps):
+        # print(f"{sail.positionOffset} (Time: {time})")
+        
+        sail.compute()
+        sail.update(dt, time)
+        
+        time += dt
+    sail.Visualize()
+
+
 
 nyxRect1 = RectangleLightSail(10, 10, 100, 0, 0, np.radians(0), np.radians(0))
 nyxRect2 = RectangleLightSail(10, 10, 100, 0, 0, np.radians(20), np.radians(0))
@@ -322,13 +483,20 @@ nyxParaboloid1 = ParaboloidLightSail(1, 0.5, 100, np.radians(0), np.radians(0))
 
 nyxDisc1 = ParaboloidLightSail(5, 0, 100, np.radians(0), np.radians(0))
 
-TotalForce, TotalTorque = nyxParaboloid1.compute()
-print(f"Paraboloid Reflector Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
-nyxParaboloid1.Visualize()
+dt = 0.01
+simLoop(dt, 50, nyxRect1)
+# simLoop(dt, 50, nyxSphere1)
+# simLoop(dt, 50, nyxParaboloid1)
+# simLoop(dt, 50, nyxDisc1)
 
-TotalForce, TotalTorque = nyxSphere1.compute()
-print(f"Sphere Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
-nyxSphere1.Visualize()
+# TotalForce, TotalTorque = nyxParaboloid1.compute()
+# print(f"Paraboloid Reflector Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+# nyxParaboloid1.Visualize()
+
+# TotalForce, TotalTorque = nyxSphere1.compute()
+# print(f"Sphere Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+# nyxSphere1.Visualize()
+
 
 # TotalForce, TotalTorque = nyxSphere2.compute()
 # print(f"Sphere Test Case 2: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
@@ -339,9 +507,9 @@ nyxSphere1.Visualize()
 # nyxSphere3.Visualize()
 
 
-TotalForce, TotalTorque = nyxRect1.compute()
-print(f"Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
-nyxRect1.Visualize()
+# TotalForce, TotalTorque = nyxRect1.compute()
+# print(f"Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+# nyxRect1.Visualize()
 
 # TotalForce, TotalTorque = nyxRect2.compute()
 # print(f"Test Case 2: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
