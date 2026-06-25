@@ -34,6 +34,7 @@ def rotateY(vector, angle):
         y,
         -x*np.sin(angle) + z*np.cos(angle)
     ])
+
 def calcForce(I, normal, dA):
     cosTheta = np.dot(normal, beamDih)
     if cosTheta > 1e-10:
@@ -107,9 +108,10 @@ class RectangleLightSail():
                 y = (self.CenterY - self.height / 2) + (j+0.5) * dy
                 
                 position = np.array([x, y, 0.0])
-
                 position = rotateX(position, self.thetaX)
                 position = rotateY(position, self.thetaY)
+                
+                rotatedPos = position
                 
                 position += self.positionOffset
                 
@@ -128,7 +130,7 @@ class RectangleLightSail():
                 
                 self.forceVectors.append(F)
                 
-                tau = np.cross(position, F)
+                tau = np.cross(rotatedPos, F) 
                 
                 Force = Force + F
                 Torque = Torque + tau
@@ -136,20 +138,84 @@ class RectangleLightSail():
         self.Torque = Torque
         return Force, Torque
 
+    def derivatives(self, position, velocity, thetaX, thetaY, angularVelocity):
+        oldPosition = self.positionOffset.copy()
+        oldVelocity = self.velocity.copy()
+        oldThetaX = self.thetaX
+        oldThetaY = self.thetaY
+        oldAngVel = self.angularVelocity.copy()
+        
+        self.positionOffset = position
+        self.velocity = velocity
+        self.thetaX = thetaX
+        self.thetaY = thetaY
+        self.angularVelocity = angularVelocity
+        
+        self.compute()
+        
+        dpos = self.velocity.copy() #dx/dt = v
+        dvel = self.Force / self.mass #dv/dt = a
+        dthX = self.angularVelocity[0] #d(thetaX)/dt = omegaX
+        dthY = self.angularVelocity[1] #d(thetaY)/dt = omegaY
+        dangVel = self.Torque / self.momentOfInertia #d(omega)/dt = alpha # lmao "dang"
+        
+        self.positionOffset = oldPosition
+        self.velocity = oldVelocity
+        self.thetaX = oldThetaX
+        self.thetaY = oldThetaY
+        
+        return dpos, dvel, dthX, dthY, dangVel
+    
     def update(self, dt, time):
-        acceleration = (self.Force / self.mass)
-        self.angularAcceleration= (self.Torque / self.momentOfInertia)
+        pos = self.positionOffset.copy()
+        velocity = self.velocity.copy()
+        thetaX = self.thetaX
+        thetaY = self.thetaY
+        angularVelocity = self.angularVelocity.copy()
         
-        self.velocity += (acceleration * dt)
-        self.angularVelocity += (self.angularAcceleration * dt)
+        #k1
+        dpos1, dvel1, dthX1, dthY1, dangVel1 = self.derivatives(pos, velocity, thetaX, thetaY, angularVelocity)
         
-        self.velocity *= 0.995 # Dampening, since tiny errors can accumulate and cause problems :3
-        self.angularVelocity *= 0.995
+        #k2
+        p2 = pos + 0.5 * dt * dpos1
+        v2 = velocity + 0.5 * dt * dvel1
+        thx2 = thetaX + 0.5 * dt * dthX1
+        thy2 = thetaY + 0.5 * dt * dthY1
+        w2 = angularVelocity + 0.5 * dt * dangVel1
         
-        self.positionOffset += (self.velocity * dt)
-        self.thetaX += (self.angularVelocity[0] * dt)
-        self.thetaY += (self.angularVelocity[1] * dt)
+        dpos2, dvel2, dthX2, dthY2, dangVel2 = self.derivatives(p2, v2, thx2, thy2, w2)
         
+        #k3
+        p3 = pos + 0.5 * dt * dpos2
+        v3 = velocity + 0.5 * dt * dvel2
+        thx3 = thetaX + 0.5 * dt * dthX2
+        thy3 = thetaY + 0.5 * dt * dthY2
+        w3 = angularVelocity + 0.5 * dt * dangVel2
+        
+        dpos3, dvel3, dthX3, dthY3, dangVel3 = self.derivatives(p3, v3, thx3, thy3, w3)
+        
+        #k4
+        p4 = pos * dt * dpos3
+        v4 = velocity * dt * dvel3
+        thx4 = thetaX * dt * dthX3
+        thy4 = thetaY * dt * dthY3
+        w4 = angularVelocity * dt * dangVel3
+        
+        dpos4, dvel4, dthX4, dthY4, dangVel4 = self.derivatives(p3, v3, thx3, thy3, w3)
+        
+        #weighted average or something idk im just following a random RK4 tutorial i aint that smart
+        finalpos = pos + (dt/ 6.0) * (dpos1 + 2*dpos2 + 2*dpos3 + dpos4)
+        finalvelocity = velocity + (dt/ 6.0) * (dvel1 + 2*dvel2 + 2*dvel3 + dvel4)
+        finalthetaX = thetaX + (dt/ 6.0) * (dthX1 + 2*dthX2 + 2*dthX3 + dthX4)
+        finalthetaY = thetaY + (dt/ 6.0) * (dthY1 + 2*dthY2 + 2*dthY3 + dthY4)
+        finalangVel = angularVelocity + (dt/ 6.0) * (dangVel1 + 2*dangVel2 + 2*dangVel3 + dangVel4)
+        
+        self.positionOffset = finalpos
+        self.velocity = finalvelocity
+        self.thetaX = finalthetaX
+        self.thetaY = finalthetaY
+        self.angularVelocity = finalangVel
+
         self.history["time"].append(time)
         self.history["position"].append(self.positionOffset.copy())
         self.history["velocity"].append(self.velocity.copy())
@@ -162,8 +228,6 @@ class RectangleLightSail():
     def Visualize(self):
         fig = plt.figure()
         
-        Force, Torque = self.compute()
-        
         ax = fig.add_subplot(111, projection='3d')
         positions = np.array(self.history["position"])
         
@@ -173,9 +237,9 @@ class RectangleLightSail():
         
         fig.colorbar(scatter, ax=ax, label='Beam Intensity (W/m^2)')
         
-        ax.quiver(0, 0, 0, Force[0], Force[1], Force[2], color='red', length=2, normalize=True)
+        ax.quiver(0, 0, 0, self.Force[0], self.Force[1], self.Force[2], color='red', length=2, normalize=True)
         
-        ax.text2D(0.05, 0.95, f'Total Force: {Force}\nTotal Torque: {Torque}')
+        ax.text2D(0.05, 0.95, f'Total Force: {self.Force}\nTotal Torque: {self.Torque}')
         
         ax.set_box_aspect([1,1,1])
         ax.view_init(elev=30, azim=45)
@@ -229,6 +293,7 @@ class SphereLightSail():
         self.xPoints=[]
         self.yPoints=[]
         self.zPoints=[]
+        self.intensities = []
         
         Force = np.array([0.0, 0.0, 0.0])
         Torque = np.array([0.0, 0.0, 0.0])
@@ -276,17 +341,84 @@ class SphereLightSail():
         self.Torque = Torque
         return Force, Torque
 
+    def derivatives(self, position, velocity, thetaX, thetaY, angularVelocity):
+        oldPosition = self.positionOffset.copy()
+        oldVelocity = self.velocity.copy()
+        oldThetaX = self.thetaX
+        oldThetaY = self.thetaY
+        oldAngVel = self.angularVelocity.copy()
+        
+        self.positionOffset = position
+        self.velocity = velocity
+        self.thetaX = thetaX
+        self.thetaY = thetaY
+        self.angularVelocity = angularVelocity
+        
+        self.compute()
+        
+        dpos = self.velocity.copy() #dx/dt = v
+        dvel = self.Force / self.mass #dv/dt = a
+        dthX = self.angularVelocity[0] #d(thetaX)/dt = omegaX
+        dthY = self.angularVelocity[1] #d(thetaY)/dt = omegaY
+        dangVel = self.Torque / self.momentOfInertia #d(omega)/dt = alpha # lmao "dang"
+        
+        self.positionOffset = oldPosition
+        self.velocity = oldVelocity
+        self.thetaX = oldThetaX
+        self.thetaY = oldThetaY
+        
+        return dpos, dvel, dthX, dthY, dangVel
+
     def update(self, dt, time):
-        acceleration = (self.Force / self.mass)
-        self.angularAcceleration= (self.Torque / self.momentOfInertia)
+        pos = self.positionOffset.copy()
+        velocity = self.velocity.copy()
+        thetaX = self.thetaX
+        thetaY = self.thetaY
+        angularVelocity = self.angularVelocity.copy()
         
-        self.velocity += (acceleration* dt)
-        self.angularVelocity += (self.angularAcceleration * dt)
+        #k1
+        dpos1, dvel1, dthX1, dthY1, dangVel1 = self.derivatives(pos, velocity, thetaX, thetaY, angularVelocity)
         
-        self.positionOffset += (self.velocity * dt)
-        self.thetaX += (self.angularVelocity[0] * dt)
-        self.thetaY += (self.angularVelocity[1] * dt)
+        #k2
+        p2 = pos + 0.5 * dt * dpos1
+        v2 = velocity + 0.5 * dt * dvel1
+        thx2 = thetaX + 0.5 * dt * dthX1
+        thy2 = thetaY + 0.5 * dt * dthY1
+        w2 = angularVelocity + 0.5 * dt * dangVel1
         
+        dpos2, dvel2, dthX2, dthY2, dangVel2 = self.derivatives(p2, v2, thx2, thy2, w2)
+        
+        #k3
+        p3 = pos + 0.5 * dt * dpos2
+        v3 = velocity + 0.5 * dt * dvel2
+        thx3 = thetaX + 0.5 * dt * dthX2
+        thy3 = thetaY + 0.5 * dt * dthY2
+        w3 = angularVelocity + 0.5 * dt * dangVel2
+        
+        dpos3, dvel3, dthX3, dthY3, dangVel3 = self.derivatives(p3, v3, thx3, thy3, w3)
+        
+        #k4
+        p4 = pos * dt * dpos3
+        v4 = velocity * dt * dvel3
+        thx4 = thetaX * dt * dthX3
+        thy4 = thetaY * dt * dthY3
+        w4 = angularVelocity * dt * dangVel3
+        
+        dpos4, dvel4, dthX4, dthY4, dangVel4 = self.derivatives(p3, v3, thx3, thy3, w3)
+        
+        #weighted average or something idk im just following a random RK4 tutorial i aint that smart
+        finalpos = pos + (dt/ 6.0) * (dpos1 + 2*dpos2 + 2*dpos3 + dpos4)
+        finalvelocity = velocity + (dt/ 6.0) * (dvel1 + 2*dvel2 + 2*dvel3 + dvel4)
+        finalthetaX = thetaX + (dt/ 6.0) * (dthX1 + 2*dthX2 + 2*dthX3 + dthX4)
+        finalthetaY = thetaY + (dt/ 6.0) * (dthY1 + 2*dthY2 + 2*dthY3 + dthY4)
+        finalangVel = angularVelocity + (dt/ 6.0) * (dangVel1 + 2*dangVel2 + 2*dangVel3 + dangVel4)
+        
+        self.positionOffset = finalpos
+        self.velocity = finalvelocity
+        self.thetaX = finalthetaX
+        self.thetaY = finalthetaY
+        self.angularVelocity = finalangVel
+
         self.history["time"].append(time)
         self.history["position"].append(self.positionOffset.copy())
         self.history["velocity"].append(self.velocity.copy())
@@ -299,6 +431,11 @@ class SphereLightSail():
     def Visualize(self):
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
+        
+        positions = np.array(self.history["position"])
+        
+        ax.plot(positions[:,0], positions[:,1], positions[:,2])
+        
         scatter = ax.scatter(self.xPoints, self.yPoints, self.zPoints, c=self.intensities, cmap='plasma', s=30)
         
         fig.colorbar(scatter, ax=ax, label='Beam Intensity (W/m^2)')
@@ -370,7 +507,7 @@ class ParaboloidLightSail(): #Paraboloid Reflector
                 x = r * np.cos(phi)
                 y = r * np.sin(phi)
                 
-                z = self.a * (self.radius**2 - r**2)
+                z = -self.a * (self.radius**2 - r**2)
                 
                 normal = np.array([2 * self.a * x, 2 * self.a * y, 1.0])
                 normal = normal / np.linalg.norm(normal)
@@ -408,17 +545,84 @@ class ParaboloidLightSail(): #Paraboloid Reflector
         self.Torque=Torque
         return Force, Torque
 
+    def derivatives(self, position, velocity, thetaX, thetaY, angularVelocity):
+        oldPosition = self.positionOffset.copy()
+        oldVelocity = self.velocity.copy()
+        oldThetaX = self.thetaX
+        oldThetaY = self.thetaY
+        oldAngVel = self.angularVelocity.copy()
+        
+        self.positionOffset = position
+        self.velocity = velocity
+        self.thetaX = thetaX
+        self.thetaY = thetaY
+        self.angularVelocity = angularVelocity
+        
+        self.compute()
+        
+        dpos = self.velocity.copy() #dx/dt = v
+        dvel = self.Force / self.mass #dv/dt = a
+        dthX = self.angularVelocity[0] #d(thetaX)/dt = omegaX
+        dthY = self.angularVelocity[1] #d(thetaY)/dt = omegaY
+        dangVel = self.Torque / self.momentOfInertia #d(omega)/dt = alpha # lmao "dang"
+        
+        self.positionOffset = oldPosition
+        self.velocity = oldVelocity
+        self.thetaX = oldThetaX
+        self.thetaY = oldThetaY
+        
+        return dpos, dvel, dthX, dthY, dangVel
+
     def update(self, dt, time):
-        acceleration = (self.Force / self.mass)
-        self.angularAcceleration= (self.Torque / self.momentOfInertia)
+        pos = self.positionOffset.copy()
+        velocity = self.velocity.copy()
+        thetaX = self.thetaX
+        thetaY = self.thetaY
+        angularVelocity = self.angularVelocity.copy()
         
-        self.velocity += (acceleration* dt)
-        self.angularVelocity += (self.angularAcceleration * dt)
+        #k1
+        dpos1, dvel1, dthX1, dthY1, dangVel1 = self.derivatives(pos, velocity, thetaX, thetaY, angularVelocity)
         
-        self.positionOffset += (self.velocity * dt)
-        self.thetaX += (self.angularVelocity[0] * dt)
-        self.thetaY += (self.angularVelocity[1] * dt)
+        #k2
+        p2 = pos + 0.5 * dt * dpos1
+        v2 = velocity + 0.5 * dt * dvel1
+        thx2 = thetaX + 0.5 * dt * dthX1
+        thy2 = thetaY + 0.5 * dt * dthY1
+        w2 = angularVelocity + 0.5 * dt * dangVel1
         
+        dpos2, dvel2, dthX2, dthY2, dangVel2 = self.derivatives(p2, v2, thx2, thy2, w2)
+        
+        #k3
+        p3 = pos + 0.5 * dt * dpos2
+        v3 = velocity + 0.5 * dt * dvel2
+        thx3 = thetaX + 0.5 * dt * dthX2
+        thy3 = thetaY + 0.5 * dt * dthY2
+        w3 = angularVelocity + 0.5 * dt * dangVel2
+        
+        dpos3, dvel3, dthX3, dthY3, dangVel3 = self.derivatives(p3, v3, thx3, thy3, w3)
+        
+        #k4
+        p4 = pos * dt * dpos3
+        v4 = velocity * dt * dvel3
+        thx4 = thetaX * dt * dthX3
+        thy4 = thetaY * dt * dthY3
+        w4 = angularVelocity * dt * dangVel3
+        
+        dpos4, dvel4, dthX4, dthY4, dangVel4 = self.derivatives(p3, v3, thx3, thy3, w3)
+        
+        #weighted average or something idk im just following a random RK4 tutorial i aint that smart
+        finalpos = pos + (dt/ 6.0) * (dpos1 + 2*dpos2 + 2*dpos3 + dpos4)
+        finalvelocity = velocity + (dt/ 6.0) * (dvel1 + 2*dvel2 + 2*dvel3 + dvel4)
+        finalthetaX = thetaX + (dt/ 6.0) * (dthX1 + 2*dthX2 + 2*dthX3 + dthX4)
+        finalthetaY = thetaY + (dt/ 6.0) * (dthY1 + 2*dthY2 + 2*dthY3 + dthY4)
+        finalangVel = angularVelocity + (dt/ 6.0) * (dangVel1 + 2*dangVel2 + 2*dangVel3 + dangVel4)
+        
+        self.positionOffset = finalpos
+        self.velocity = finalvelocity
+        self.thetaX = finalthetaX
+        self.thetaY = finalthetaY
+        self.angularVelocity = finalangVel
+
         self.history["time"].append(time)
         self.history["position"].append(self.positionOffset.copy())
         self.history["velocity"].append(self.velocity.copy())
@@ -431,6 +635,11 @@ class ParaboloidLightSail(): #Paraboloid Reflector
     def Visualize(self):
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
+        
+        positions = np.array(self.history["position"])
+        
+        ax.plot(positions[:,0], positions[:,1], positions[:,2])
+        
         scatter = ax.scatter(self.xPoints, self.yPoints, self.zPoints, c=self.intensities, cmap='plasma', s=30)
         
         fig.colorbar(scatter, ax=ax, label='Beam Intensity (W/m^2)')
@@ -453,7 +662,7 @@ def simLoop(timestep, steps, sail):
     dt = timestep
     print("="*90)
     for step in range(steps):
-        # print(f"{sail.positionOffset} (Time: {time})")
+        print(f"{sail.positionOffset} (Time: {time})")
         
         sail.compute()
         sail.update(dt, time)
@@ -477,10 +686,11 @@ nyxParaboloid1 = ParaboloidLightSail(1, 0.5, 100, np.radians(0), np.radians(0))
 nyxDisc1 = ParaboloidLightSail(5, 0, 100, np.radians(0), np.radians(0))
 
 dt = 0.01
-simLoop(dt, 50, nyxRect1)
-# simLoop(dt, 50, nyxSphere1)
-# simLoop(dt, 50, nyxParaboloid1)
-# simLoop(dt, 50, nyxDisc1)
+time = 400
+simLoop(dt, time, nyxRect1)
+# simLoop(dt, time, nyxSphere1)
+# simLoop(dt, time, nyxParaboloid1)
+# simLoop(dt, time, nyxDisc1)
 
 # TotalForce, TotalTorque = nyxParaboloid1.compute()
 # print(f"Paraboloid Reflector Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
