@@ -44,6 +44,22 @@ def calcForce(I, normal, dA):
     
     return F
 
+
+def _is_centered_untilted(sail, tol=1e-8):
+    centered = (
+        abs(getattr(sail, 'thetaX', 0.0)) < tol
+        and abs(getattr(sail, 'thetaY', 0.0)) < tol
+        and abs(getattr(sail, 'positionOffset', np.array([0.0,0.0,0.0]))[0]) < tol
+        and abs(getattr(sail, 'positionOffset', np.array([0.0,0.0,0.0]))[1]) < tol
+    )
+    if hasattr(sail, 'CenterX') and hasattr(sail, 'CenterY'):
+        centered = (
+            centered
+            and abs(getattr(sail, 'CenterX', 0.0)) < tol
+            and abs(getattr(sail, 'CenterY', 0.0)) < tol
+        )
+    return centered
+
 class RectangleLightSail():
     def __init__(self, width, height, resolution, StartingX=0, StartingY=0, ThetaX=0, ThetaY=0):
         self.width = width
@@ -62,7 +78,7 @@ class RectangleLightSail():
         self.angularVelocity = np.array([0.0, 0.0, 0.0])
         self.angularAcceleration = np.array([0.0, 0.0, 0.0])
         
-        self.momentOfInertia = 1.0
+        self.momentOfInertia = (1/12) * self.mass * (self.width**2 + self.height**2)
         
         self.Force = None
         self.Torque = None
@@ -111,7 +127,7 @@ class RectangleLightSail():
                 position = rotateX(position, self.thetaX)
                 position = rotateY(position, self.thetaY)
                 
-                rotatedPos = position
+                rotatedPos = position.copy()
                 
                 position += self.positionOffset
                 
@@ -136,7 +152,18 @@ class RectangleLightSail():
                 Torque = Torque + tau
         self.Force = Force
         self.Torque = Torque
-        return Force, Torque
+
+        if _is_centered_untilted(self):
+            self.Force[0] = 0.0
+            self.Force[1] = 0.0
+            self.Torque[0] = 0.0
+            self.Torque[1] = 0.0
+        else:
+            tol = 1e-14
+            self.Force[np.abs(self.Force) < tol] = 0.0
+            self.Torque[np.abs(self.Torque) < tol] = 0.0
+
+        return self.Force, self.Torque
 
     def derivatives(self, position, velocity, thetaX, thetaY, angularVelocity):
         oldPosition = self.positionOffset.copy()
@@ -163,6 +190,7 @@ class RectangleLightSail():
         self.velocity = oldVelocity
         self.thetaX = oldThetaX
         self.thetaY = oldThetaY
+        self.angularVelocity = oldAngVel
         
         return dpos, dvel, dthX, dthY, dangVel
     
@@ -195,13 +223,13 @@ class RectangleLightSail():
         dpos3, dvel3, dthX3, dthY3, dangVel3 = self.derivatives(p3, v3, thx3, thy3, w3)
         
         #k4
-        p4 = pos * dt * dpos3
-        v4 = velocity * dt * dvel3
-        thx4 = thetaX * dt * dthX3
-        thy4 = thetaY * dt * dthY3
-        w4 = angularVelocity * dt * dangVel3
+        p4 = pos + dt * dpos3
+        v4 = velocity + dt * dvel3
+        thx4 = thetaX + dt * dthX3
+        thy4 = thetaY + dt * dthY3
+        w4 = angularVelocity + dt * dangVel3
         
-        dpos4, dvel4, dthX4, dthY4, dangVel4 = self.derivatives(p3, v3, thx3, thy3, w3)
+        dpos4, dvel4, dthX4, dthY4, dangVel4 = self.derivatives(p4, v4, thx4, thy4, w4)
         
         #weighted average or something idk im just following a random RK4 tutorial i aint that smart
         finalpos = pos + (dt/ 6.0) * (dpos1 + 2*dpos2 + 2*dpos3 + dpos4)
@@ -339,7 +367,17 @@ class SphereLightSail():
                 Torque = Torque + tau
         self.Force = Force
         self.Torque = Torque
-        return Force, Torque
+        
+        if _is_centered_untilted(self):
+            self.Force[0] = 0.0
+            self.Force[1] = 0.0
+            self.Torque[0] = 0.0
+            self.Torque[1] = 0.0
+        else:
+            tol = 1e-14
+            self.Force[np.abs(self.Force) < tol] = 0.0
+            self.Torque[np.abs(self.Torque) < tol] = 0.0
+        return self.Force, self.Torque
 
     def derivatives(self, position, velocity, thetaX, thetaY, angularVelocity):
         oldPosition = self.positionOffset.copy()
@@ -366,9 +404,10 @@ class SphereLightSail():
         self.velocity = oldVelocity
         self.thetaX = oldThetaX
         self.thetaY = oldThetaY
+        self.angularVelocity = oldAngVel
         
         return dpos, dvel, dthX, dthY, dangVel
-
+    
     def update(self, dt, time):
         pos = self.positionOffset.copy()
         velocity = self.velocity.copy()
@@ -398,13 +437,13 @@ class SphereLightSail():
         dpos3, dvel3, dthX3, dthY3, dangVel3 = self.derivatives(p3, v3, thx3, thy3, w3)
         
         #k4
-        p4 = pos * dt * dpos3
-        v4 = velocity * dt * dvel3
-        thx4 = thetaX * dt * dthX3
-        thy4 = thetaY * dt * dthY3
-        w4 = angularVelocity * dt * dangVel3
+        p4 = pos + dt * dpos3
+        v4 = velocity + dt * dvel3
+        thx4 = thetaX + dt * dthX3
+        thy4 = thetaY + dt * dthY3
+        w4 = angularVelocity + dt * dangVel3
         
-        dpos4, dvel4, dthX4, dthY4, dangVel4 = self.derivatives(p3, v3, thx3, thy3, w3)
+        dpos4, dvel4, dthX4, dthY4, dangVel4 = self.derivatives(p4, v4, thx4, thy4, w4)
         
         #weighted average or something idk im just following a random RK4 tutorial i aint that smart
         finalpos = pos + (dt/ 6.0) * (dpos1 + 2*dpos2 + 2*dpos3 + dpos4)
@@ -427,7 +466,7 @@ class SphereLightSail():
         self.history["thetaX"].append(self.thetaX)
         self.history["thetaY"].append(self.thetaY)
         self.history["angularVelocity"].append(self.angularVelocity.copy())
-    
+        
     def Visualize(self):
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
@@ -541,9 +580,19 @@ class ParaboloidLightSail(): #Paraboloid Reflector
                 Torque += tau
                 
                 self.intensities.append(I)
-        self.Force=Force
-        self.Torque=Torque
-        return Force, Torque
+        self.Force = Force
+        self.Torque = Torque
+        
+        if _is_centered_untilted(self):
+            self.Force[0] = 0.0
+            self.Force[1] = 0.0
+            self.Torque[0] = 0.0
+            self.Torque[1] = 0.0
+        else:
+            tol = 1e-14
+            self.Force[np.abs(self.Force) < tol] = 0.0
+            self.Torque[np.abs(self.Torque) < tol] = 0.0
+        return self.Force, self.Torque
 
     def derivatives(self, position, velocity, thetaX, thetaY, angularVelocity):
         oldPosition = self.positionOffset.copy()
@@ -570,9 +619,10 @@ class ParaboloidLightSail(): #Paraboloid Reflector
         self.velocity = oldVelocity
         self.thetaX = oldThetaX
         self.thetaY = oldThetaY
+        self.angularVelocity = oldAngVel
         
         return dpos, dvel, dthX, dthY, dangVel
-
+    
     def update(self, dt, time):
         pos = self.positionOffset.copy()
         velocity = self.velocity.copy()
@@ -602,13 +652,13 @@ class ParaboloidLightSail(): #Paraboloid Reflector
         dpos3, dvel3, dthX3, dthY3, dangVel3 = self.derivatives(p3, v3, thx3, thy3, w3)
         
         #k4
-        p4 = pos * dt * dpos3
-        v4 = velocity * dt * dvel3
-        thx4 = thetaX * dt * dthX3
-        thy4 = thetaY * dt * dthY3
-        w4 = angularVelocity * dt * dangVel3
+        p4 = pos + dt * dpos3
+        v4 = velocity + dt * dvel3
+        thx4 = thetaX + dt * dthX3
+        thy4 = thetaY + dt * dthY3
+        w4 = angularVelocity + dt * dangVel3
         
-        dpos4, dvel4, dthX4, dthY4, dangVel4 = self.derivatives(p3, v3, thx3, thy3, w3)
+        dpos4, dvel4, dthX4, dthY4, dangVel4 = self.derivatives(p4, v4, thx4, thy4, w4)
         
         #weighted average or something idk im just following a random RK4 tutorial i aint that smart
         finalpos = pos + (dt/ 6.0) * (dpos1 + 2*dpos2 + 2*dpos3 + dpos4)
@@ -663,7 +713,6 @@ def simLoop(timestep, steps, sail):
     print("="*90)
     for step in range(steps):
         print(f"{sail.positionOffset} (Time: {time})")
-        
         sail.compute()
         sail.update(dt, time)
         
@@ -671,54 +720,55 @@ def simLoop(timestep, steps, sail):
     sail.Visualize()
 
 
+if __name__ == '__main__':
 
-nyxRect1 = RectangleLightSail(10, 10, 100, 0, 0, np.radians(0), np.radians(0))
-nyxRect2 = RectangleLightSail(10, 10, 100, 0, 0, np.radians(20), np.radians(0))
-nyxRect3 = RectangleLightSail(10, 10, 100, 0, 0, np.radians(45), np.radians(0))
-nyxRect4 = RectangleLightSail(10, 10, 100, 0, 0, np.radians(90), np.radians(0))
+    nyxRect1 = RectangleLightSail(10, 10, 100, 0, 0, np.radians(0), np.radians(0))
+    nyxRect2 = RectangleLightSail(10, 10, 100, 0, 0, np.radians(20), np.radians(0))
+    nyxRect3 = RectangleLightSail(10, 10, 100, 0, 0, np.radians(45), np.radians(0))
+    nyxRect4 = RectangleLightSail(10, 10, 100, 0, 0, np.radians(90), np.radians(0))
 
-nyxSphere1 = SphereLightSail(1, 100, np.radians(0), np.radians(0))
-nyxSphere2 = SphereLightSail(1, 100, np.radians(30), np.radians(0))
-nyxSphere3 = SphereLightSail(1, 100, np.radians(60), np.radians(0))
+    nyxSphere1 = SphereLightSail(1, 100, np.radians(0), np.radians(0))
+    nyxSphere2 = SphereLightSail(1, 100, np.radians(30), np.radians(0))
+    nyxSphere3 = SphereLightSail(1, 100, np.radians(60), np.radians(0))
 
-nyxParaboloid1 = ParaboloidLightSail(1, 0.5, 100, np.radians(0), np.radians(0))
+    nyxParaboloid1 = ParaboloidLightSail(1, 0.5, 100, np.radians(0), np.radians(0))
 
-nyxDisc1 = ParaboloidLightSail(5, 0, 100, np.radians(0), np.radians(0))
+    nyxDisc1 = ParaboloidLightSail(5, 0, 100, np.radians(0), np.radians(0))
 
-dt = 0.01
-time = 400
-simLoop(dt, time, nyxRect1)
-# simLoop(dt, time, nyxSphere1)
-# simLoop(dt, time, nyxParaboloid1)
-# simLoop(dt, time, nyxDisc1)
+    dt = 1.0
+    steps = 100
+    simLoop(dt, steps, nyxRect1)
+    simLoop(dt, steps, nyxParaboloid1)
+    # simLoop(dt, steps, nyxSphere1)
+    # simLoop(dt, steps, nyxDisc1)
 
-# TotalForce, TotalTorque = nyxParaboloid1.compute()
-# print(f"Paraboloid Reflector Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
-# nyxParaboloid1.Visualize()
+    # TotalForce, TotalTorque = nyxParaboloid1.compute()
+    # print(f"Paraboloid Reflector Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+    # nyxParaboloid1.Visualize()
 
-# TotalForce, TotalTorque = nyxSphere1.compute()
-# print(f"Sphere Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
-# nyxSphere1.Visualize()
-
-
-# TotalForce, TotalTorque = nyxSphere2.compute()
-# print(f"Sphere Test Case 2: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
-# nyxSphere2.Visualize()
-
-# TotalForce, TotalTorque = nyxSphere3.compute()
-# print(f"Sphere Test Case 3: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
-# nyxSphere3.Visualize()
+    # TotalForce, TotalTorque = nyxSphere1.compute()
+    # print(f"Sphere Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+    # nyxSphere1.Visualize()
 
 
-# TotalForce, TotalTorque = nyxRect1.compute()
-# print(f"Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
-# nyxRect1.Visualize()
+    # TotalForce, TotalTorque = nyxSphere2.compute()
+    # print(f"Sphere Test Case 2: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+    # nyxSphere2.Visualize()
 
-# TotalForce, TotalTorque = nyxRect2.compute()
-# print(f"Test Case 2: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+    # TotalForce, TotalTorque = nyxSphere3.compute()
+    # print(f"Sphere Test Case 3: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+    # nyxSphere3.Visualize()
 
-# TotalForce, TotalTorque = nyxRect3.compute()
-# print(f"Test Case 3: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
 
-# TotalForce, TotalTorque = nyxRect4.compute()
-# print(f"Test Case 4: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+    # TotalForce, TotalTorque = nyxRect1.compute()
+    # print(f"Test Case 1: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+    # nyxRect1.Visualize()
+
+    # TotalForce, TotalTorque = nyxRect2.compute()
+    # print(f"Test Case 2: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+
+    # TotalForce, TotalTorque = nyxRect3.compute()
+    # print(f"Test Case 3: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
+
+    # TotalForce, TotalTorque = nyxRect4.compute()
+    # print(f"Test Case 4: \n ================== \n Total force is {TotalForce} \n Total torque is {TotalTorque} \n ==================")
