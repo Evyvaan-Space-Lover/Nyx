@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-
+from decimal import Decimal
 
 c = 3e8 #The Speed of Light in m/s. This is a constant for the simulation, and can be changed to test different scenarios.
 
@@ -36,40 +36,103 @@ def rotateY(vector, angle):
     ])
 
 def calcForce(I, normal, dA):
+    if not np.all(np.isfinite(normal)):
+        return np.array([0.0, 0.0, 0.0])
+    norm = np.linalg.norm(normal)
+    if not np.isfinite(norm) or norm < 1e-15:
+        return np.array([0.0, 0.0, 0.0])
+    normal = normal / norm
+
     cosTheta = np.dot(normal, beamDih)
-    if cosTheta > 1e-10:
-        F = 2 * (I / c) * (cosTheta ** 2) * dA * normal
-    else:
-        F = np.array([0.0, 0.0, 0.0])
-    
-    return F
+    if not np.isfinite(cosTheta):
+        return np.array([0.0, 0.0, 0.0])
+    cosTheta = np.clip(cosTheta, -1.0, 1.0)
+    if cosTheta <= 1e-10:
+        return np.array([0.0, 0.0, 0.0])
+
+    return 2 * (I / c) * (cosTheta ** 2) * dA * normal
 
 
 def _is_centered_untilted(sail, tol=1e-8):
-    centered = (
-        abs(getattr(sail, 'thetaX', 0.0)) < tol
-        and abs(getattr(sail, 'thetaY', 0.0)) < tol
-        and abs(getattr(sail, 'positionOffset', np.array([0.0,0.0,0.0]))[0]) < tol
-        and abs(getattr(sail, 'positionOffset', np.array([0.0,0.0,0.0]))[1]) < tol
-    )
+    pos = getattr(sail, 'positionOffset', np.array([0.0, 0.0, 0.0]))
+    centered = abs(pos[0]) < tol and abs(pos[1]) < tol
     if hasattr(sail, 'CenterX') and hasattr(sail, 'CenterY'):
         centered = (
             centered
             and abs(getattr(sail, 'CenterX', 0.0)) < tol
             and abs(getattr(sail, 'CenterY', 0.0)) < tol
         )
-    return centered
+
+    orientation = getattr(sail, 'orientation', np.array([1.0, 0.0, 0.0, 0.0]))
+    orientation = normalizeQuaternion(orientation)
+    untilted = np.allclose(orientation, np.array([1.0, 0.0, 0.0, 0.0]), atol=tol)
+    return centered and untilted
+
+def quaternionMultiply(q1, q2):
+    w1, x1, y1, z1 = q1
+    w2, x2, y2, z2 = q2
+    
+    return np.array([
+        w1*w2 - x1*x2 - y1*y2 - z1*z2,
+        w1*x2 + x1*w2 + y1*z2 - z1*y2,
+        w1*y2 - x1*z2 + y1*w2 + z1*x2,
+        w1*z2 + x1*y2 - y1*x2 + z1*w2
+    ])
+
+def normalizeQuaternion(q):
+    norm = np.linalg.norm(q)
+    if not np.isfinite(norm) or norm < 1e-15:
+        return np.array([1.0, 0.0, 0.0, 0.0])
+    return q / norm
+
+def rotateVector(vector, quaternion):
+    q = quaternion
+    if not np.all(np.isfinite(q)):
+        q = np.array([1.0, 0.0, 0.0, 0.0])
+    q = normalizeQuaternion(q)
+    
+    qConj = np.array([q[0], -q[1], -q[2], -q[3]])
+    
+    vecQuat = np.array([0.0, vector[0], vector[1], vector[2]])
+    
+    rotated = quaternionMultiply(quaternionMultiply(q, vecQuat), qConj)
+    
+    return rotated[1:]
+
+def angularVelocityToQuaternion(omega, dt):
+    angle = np.linalg.norm(omega) * dt
+    
+    if angle < 1e-8:
+        return np.array([1.0, 0.0, 0.0, 0.0])
+    
+    axis = omega / np.linalg.norm(omega)
+    sin_half = np.sin(angle / 2)
+    return np.array([np.cos(angle / 2), axis[0] * sin_half, axis[1] * sin_half, axis[2] * sin_half])
+
+def eul2quat(thetaX, thetaY, thetaZ=0):
+    cx = np.cos(thetaX/2)
+    sx = np.sin(thetaX/2)
+    
+    cy = np.cos(thetaY/2)
+    sy = np.sin(thetaY/2)
+    
+    cz = np.cos(thetaZ/2)
+    sz = np.sin(thetaZ/2)
+    
+    w = cx*cy*cz + sx*sy*sz
+    x = sx*cy*cz - cx*sy*sz
+    y = cx*sy*cz + sx*cy*sz
+    z =cx*cy*sz - sz*sy*cz
+    
+    return np.array([w, x, y, z])
 
 class RectangleLightSail():
-    def __init__(self, width, height, resolution, StartingX=0, StartingY=0, ThetaX=0, ThetaY=0):
+    def __init__(self, width, height, resolution, StartingX=0, StartingY=0, thetaX=0, thetaY=0):
         self.width = width
         self.height = height
         self.resolution = resolution
         self.CenterX = StartingX
         self.CenterY = StartingY
-        self.thetaX = ThetaX
-        self.thetaY = ThetaY
-        
         self.mass = 1.0
         
         self.velocity = np.array([0.0, 0.0, 0.0])
@@ -79,6 +142,11 @@ class RectangleLightSail():
         self.angularAcceleration = np.array([0.0, 0.0, 0.0])
         
         self.momentOfInertia = (1/12) * self.mass * (self.width**2 + self.height**2)
+        
+        self.thetaX = thetaX
+        self.thetaY = thetaY
+        self.thetaZ = 0.0
+        self.orientation = eul2quat(thetaX, thetaY) #w, x, y, z
         
         self.Force = None
         self.Torque = None
@@ -96,8 +164,7 @@ class RectangleLightSail():
             "velocity": [],
             "force": [],
             "torque": [],
-            "thetaX": [],
-            "thetaY": [],
+            "orientation": [],
             "angularVelocity": []
         }
     def compute(self):
@@ -124,8 +191,9 @@ class RectangleLightSail():
                 y = (self.CenterY - self.height / 2) + (j+0.5) * dy
                 
                 position = np.array([x, y, 0.0])
-                position = rotateX(position, self.thetaX)
-                position = rotateY(position, self.thetaY)
+                normal = np.array([0.0, 0.0, 1.0])
+                
+                position = rotateVector(position, self.orientation)
                 
                 rotatedPos = position.copy()
                 
@@ -140,7 +208,7 @@ class RectangleLightSail():
                 
                 self.intensities.append(I)
                 
-                normal = np.array([np.sin(self.thetaY) * np.cos(self.thetaX), -np.sin(self.thetaX), np.cos(self.thetaX) * np.cos(self.thetaY)])
+                normal = rotateVector(normal, self.orientation)
                 
                 F = calcForce(I, normal, dA)
                 
@@ -165,83 +233,77 @@ class RectangleLightSail():
 
         return self.Force, self.Torque
 
-    def derivatives(self, position, velocity, thetaX, thetaY, angularVelocity):
+    def derivatives(self, position, velocity, orientation, angularVelocity):
         oldPosition = self.positionOffset.copy()
         oldVelocity = self.velocity.copy()
-        oldThetaX = self.thetaX
-        oldThetaY = self.thetaY
+        oldOrientation = self.orientation.copy()
         oldAngVel = self.angularVelocity.copy()
         
         self.positionOffset = position
         self.velocity = velocity
-        self.thetaX = thetaX
-        self.thetaY = thetaY
+        self.orientation = orientation
         self.angularVelocity = angularVelocity
         
         self.compute()
         
         dpos = self.velocity.copy() #dx/dt = v
         dvel = self.Force / self.mass #dv/dt = a
-        dthX = self.angularVelocity[0] #d(thetaX)/dt = omegaX
-        dthY = self.angularVelocity[1] #d(thetaY)/dt = omegaY
+        omegaQuat = np.array([0.0, angularVelocity[0], angularVelocity[1], angularVelocity[2]])
+        qDot = 0.5 * quaternionMultiply(omegaQuat, orientation)
         dangVel = self.Torque / self.momentOfInertia #d(omega)/dt = alpha # lmao "dang"
         
         self.positionOffset = oldPosition
         self.velocity = oldVelocity
-        self.thetaX = oldThetaX
-        self.thetaY = oldThetaY
+        self.orientation = oldOrientation
         self.angularVelocity = oldAngVel
         
-        return dpos, dvel, dthX, dthY, dangVel
+        return dpos, dvel, qDot, dangVel
     
     def update(self, dt, time):
         pos = self.positionOffset.copy()
         velocity = self.velocity.copy()
-        thetaX = self.thetaX
-        thetaY = self.thetaY
+        orientation = self.orientation.copy()
         angularVelocity = self.angularVelocity.copy()
         
         #k1
-        dpos1, dvel1, dthX1, dthY1, dangVel1 = self.derivatives(pos, velocity, thetaX, thetaY, angularVelocity)
+        dpos1, dvel1, dq1, dangVel1 = self.derivatives(pos, velocity, orientation, angularVelocity)
         
         #k2
         p2 = pos + 0.5 * dt * dpos1
         v2 = velocity + 0.5 * dt * dvel1
-        thx2 = thetaX + 0.5 * dt * dthX1
-        thy2 = thetaY + 0.5 * dt * dthY1
+        q2 = orientation + 0.5 * dt * dq1
+        q2 = normalizeQuaternion(q2)
         w2 = angularVelocity + 0.5 * dt * dangVel1
         
-        dpos2, dvel2, dthX2, dthY2, dangVel2 = self.derivatives(p2, v2, thx2, thy2, w2)
+        dpos2, dvel2, dq2, dangVel2 = self.derivatives(p2, v2, q2, w2)
         
         #k3
         p3 = pos + 0.5 * dt * dpos2
         v3 = velocity + 0.5 * dt * dvel2
-        thx3 = thetaX + 0.5 * dt * dthX2
-        thy3 = thetaY + 0.5 * dt * dthY2
+        q3 = orientation + 0.5 * dt * dq2
+        q3 = normalizeQuaternion(q3)
         w3 = angularVelocity + 0.5 * dt * dangVel2
         
-        dpos3, dvel3, dthX3, dthY3, dangVel3 = self.derivatives(p3, v3, thx3, thy3, w3)
+        dpos3, dvel3, dq3, dangVel3 = self.derivatives(p3, v3, q3, w3)
         
         #k4
         p4 = pos + dt * dpos3
         v4 = velocity + dt * dvel3
-        thx4 = thetaX + dt * dthX3
-        thy4 = thetaY + dt * dthY3
+        q4 = orientation + dt * dq3
         w4 = angularVelocity + dt * dangVel3
         
-        dpos4, dvel4, dthX4, dthY4, dangVel4 = self.derivatives(p4, v4, thx4, thy4, w4)
+        dpos4, dvel4, dq4, dangVel4 = self.derivatives(p4, v4, q4, w4)
         
         #weighted average or something idk im just following a random RK4 tutorial i aint that smart
         finalpos = pos + (dt/ 6.0) * (dpos1 + 2*dpos2 + 2*dpos3 + dpos4)
         finalvelocity = velocity + (dt/ 6.0) * (dvel1 + 2*dvel2 + 2*dvel3 + dvel4)
-        finalthetaX = thetaX + (dt/ 6.0) * (dthX1 + 2*dthX2 + 2*dthX3 + dthX4)
-        finalthetaY = thetaY + (dt/ 6.0) * (dthY1 + 2*dthY2 + 2*dthY3 + dthY4)
+        finalOrientation = orientation + (dt / 6.0) * (dq1 + 2*dq2 + 2*dq3 + dq4)
+        finalOrientation = normalizeQuaternion(finalOrientation)
         finalangVel = angularVelocity + (dt/ 6.0) * (dangVel1 + 2*dangVel2 + 2*dangVel3 + dangVel4)
         
         self.positionOffset = finalpos
         self.velocity = finalvelocity
-        self.thetaX = finalthetaX
-        self.thetaY = finalthetaY
+        self.orientation = finalOrientation
         self.angularVelocity = finalangVel
 
         self.history["time"].append(time)
@@ -249,8 +311,8 @@ class RectangleLightSail():
         self.history["velocity"].append(self.velocity.copy())
         self.history["force"].append(self.Force.copy())
         self.history["torque"].append(self.Torque.copy())
-        self.history["thetaX"].append(self.thetaX)
-        self.history["thetaY"].append(self.thetaY)
+        self.history["orientation"].append(self.orientation.copy())
+
         self.history["angularVelocity"].append(self.angularVelocity.copy())
 
     def Visualize(self):
@@ -284,9 +346,6 @@ class SphereLightSail():
     def __init__(self, radius, resolution, thetaX, thetaY):
         self.radius = radius
         self.resolution = resolution
-        self.thetaX = thetaX
-        self.thetaY = thetaY
-        
         self.mass = 1.0
         
         self.velocity = np.array([0.0, 0.0, 0.0])
@@ -295,7 +354,9 @@ class SphereLightSail():
         self.angularVelocity = np.array([0.0, 0.0, 0.0])
         self.angularAcceleration = np.array([0.0, 0.0, 0.0])
         
-        self.momentOfInertia = 1.0
+        self.momentOfInertia = (2/3) * self.mass * self.radius**2
+        
+        self.orientation = eul2quat(thetaX, thetaY) #w, x, y, z
         
         self.Force = None
         self.Torque = None
@@ -312,8 +373,7 @@ class SphereLightSail():
             "velocity": [],
             "force": [],
             "torque": [],
-            "thetaX": [],
-            "thetaY": [],
+            "orientation": [],
             "angularVelocity": []
         }
 
@@ -337,9 +397,10 @@ class SphereLightSail():
                 z = self.radius * np.cos(theta)
                 
                 position = np.array([x, y, z])
+                localPosition = position.copy()
+                position = rotateVector(position, self.orientation)
                 
-                position = rotateX(position, self.thetaX)
-                position = rotateY(position, self.thetaY)
+                rotatedPos = position.copy()
                 
                 position += self.positionOffset
                 
@@ -347,7 +408,8 @@ class SphereLightSail():
                 self.yPoints.append(position[1])
                 self.zPoints.append(position[2])
                 
-                normal = position / np.linalg.norm(position)
+                normal = position / np.linalg.norm(localPosition)
+                normal = rotateVector(normal, self.orientation)
                 
                 r = np.sqrt(position[0]**2 + position[1]**2)
                 I = gaussian(position[0], position[1])
@@ -361,7 +423,7 @@ class SphereLightSail():
                 
                 F = calcForce(I, normal, dA)
                 
-                tau = np.cross(position, F)
+                tau = np.cross(rotatedPos, F)
                 
                 Force = Force + F
                 Torque = Torque + tau
@@ -379,83 +441,78 @@ class SphereLightSail():
             self.Torque[np.abs(self.Torque) < tol] = 0.0
         return self.Force, self.Torque
 
-    def derivatives(self, position, velocity, thetaX, thetaY, angularVelocity):
+    def derivatives(self, position, velocity, orientation, angularVelocity):
         oldPosition = self.positionOffset.copy()
         oldVelocity = self.velocity.copy()
-        oldThetaX = self.thetaX
-        oldThetaY = self.thetaY
+        oldOrientation = self.orientation.copy()
         oldAngVel = self.angularVelocity.copy()
         
         self.positionOffset = position
         self.velocity = velocity
-        self.thetaX = thetaX
-        self.thetaY = thetaY
+        self.orientation = orientation
         self.angularVelocity = angularVelocity
         
         self.compute()
         
         dpos = self.velocity.copy() #dx/dt = v
         dvel = self.Force / self.mass #dv/dt = a
-        dthX = self.angularVelocity[0] #d(thetaX)/dt = omegaX
-        dthY = self.angularVelocity[1] #d(thetaY)/dt = omegaY
+        omegaQuat = np.array([0.0, angularVelocity[0], angularVelocity[1], angularVelocity[2]])
+        qDot = 0.5 * quaternionMultiply(omegaQuat, orientation)
         dangVel = self.Torque / self.momentOfInertia #d(omega)/dt = alpha # lmao "dang"
         
         self.positionOffset = oldPosition
         self.velocity = oldVelocity
-        self.thetaX = oldThetaX
-        self.thetaY = oldThetaY
+        self.orientation = oldOrientation
         self.angularVelocity = oldAngVel
         
-        return dpos, dvel, dthX, dthY, dangVel
+        return dpos, dvel, qDot, dangVel
     
     def update(self, dt, time):
         pos = self.positionOffset.copy()
         velocity = self.velocity.copy()
-        thetaX = self.thetaX
-        thetaY = self.thetaY
+        orientation = self.orientation.copy()
         angularVelocity = self.angularVelocity.copy()
         
         #k1
-        dpos1, dvel1, dthX1, dthY1, dangVel1 = self.derivatives(pos, velocity, thetaX, thetaY, angularVelocity)
+        dpos1, dvel1, dq1, dangVel1 = self.derivatives(pos, velocity, orientation, angularVelocity)
         
         #k2
         p2 = pos + 0.5 * dt * dpos1
         v2 = velocity + 0.5 * dt * dvel1
-        thx2 = thetaX + 0.5 * dt * dthX1
-        thy2 = thetaY + 0.5 * dt * dthY1
+        q2 = orientation + 0.5 * dt * dq1
+        q2 = normalizeQuaternion(q2)
         w2 = angularVelocity + 0.5 * dt * dangVel1
         
-        dpos2, dvel2, dthX2, dthY2, dangVel2 = self.derivatives(p2, v2, thx2, thy2, w2)
+        dpos2, dvel2, dq2, dangVel2 = self.derivatives(p2, v2, q2, w2)
         
         #k3
         p3 = pos + 0.5 * dt * dpos2
         v3 = velocity + 0.5 * dt * dvel2
-        thx3 = thetaX + 0.5 * dt * dthX2
-        thy3 = thetaY + 0.5 * dt * dthY2
+        q3 = orientation + 0.5 * dt * dq2
+        q3 = normalizeQuaternion(q3)
         w3 = angularVelocity + 0.5 * dt * dangVel2
         
-        dpos3, dvel3, dthX3, dthY3, dangVel3 = self.derivatives(p3, v3, thx3, thy3, w3)
+        dpos3, dvel3, dq3, dangVel3 = self.derivatives(p3, v3, q3, w3)
         
         #k4
         p4 = pos + dt * dpos3
         v4 = velocity + dt * dvel3
-        thx4 = thetaX + dt * dthX3
-        thy4 = thetaY + dt * dthY3
+        q4 = orientation + dt * dq3
+        q4 = normalizeQuaternion(q4)
         w4 = angularVelocity + dt * dangVel3
         
-        dpos4, dvel4, dthX4, dthY4, dangVel4 = self.derivatives(p4, v4, thx4, thy4, w4)
+        dpos4, dvel4, dq4, dangVel4 = self.derivatives(p4, v4, q4, w4)
         
         #weighted average or something idk im just following a random RK4 tutorial i aint that smart
         finalpos = pos + (dt/ 6.0) * (dpos1 + 2*dpos2 + 2*dpos3 + dpos4)
         finalvelocity = velocity + (dt/ 6.0) * (dvel1 + 2*dvel2 + 2*dvel3 + dvel4)
-        finalthetaX = thetaX + (dt/ 6.0) * (dthX1 + 2*dthX2 + 2*dthX3 + dthX4)
-        finalthetaY = thetaY + (dt/ 6.0) * (dthY1 + 2*dthY2 + 2*dthY3 + dthY4)
+        finalOrientation = orientation + (dt / 6.0) * (dq1 + 2*dq2 + 2*dq3 + dq4)
+        finalOrientation = normalizeQuaternion(finalOrientation)
         finalangVel = angularVelocity + (dt/ 6.0) * (dangVel1 + 2*dangVel2 + 2*dangVel3 + dangVel4)
         
         self.positionOffset = finalpos
         self.velocity = finalvelocity
-        self.thetaX = finalthetaX
-        self.thetaY = finalthetaY
+        self.orientation = finalOrientation
         self.angularVelocity = finalangVel
 
         self.history["time"].append(time)
@@ -463,10 +520,9 @@ class SphereLightSail():
         self.history["velocity"].append(self.velocity.copy())
         self.history["force"].append(self.Force.copy())
         self.history["torque"].append(self.Torque.copy())
-        self.history["thetaX"].append(self.thetaX)
-        self.history["thetaY"].append(self.thetaY)
+        self.history["orientation"].append(self.orientation.copy())
         self.history["angularVelocity"].append(self.angularVelocity.copy())
-        
+    
     def Visualize(self):
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
@@ -497,15 +553,17 @@ class ParaboloidLightSail(): #Paraboloid Reflector
         self.radius = radius
         self.a = a
         self.resolution = resolution
-        self.thetaX = thetaX
-        self.thetaY = thetaY
         
         self.mass = 1.0
         
         self.angularVelocity = np.array([0.0, 0.0, 0.0])
         self.angularAcceleration = np.array([0.0, 0.0, 0.0])
         
-        self.momentOfInertia = 1.0
+        h = self.a * self.radius**2
+        
+        self.momentOfInertia = self.mass * ((self.radius**2)/4 + (h**2)/18) 
+        
+        self.orientation = eul2quat(thetaX, thetaY) #w, x, y, z
         
         self.velocity = np.array([0.0, 0.0, 0.0])
         self.positionOffset = np.array([0.0, 0.0, 0.0])
@@ -522,10 +580,9 @@ class ParaboloidLightSail(): #Paraboloid Reflector
             "time": [],
             "position": [],
             "velocity": [],
-            "force": [],    
+            "force": [],
             "torque": [],
-            "thetaX": [],
-            "thetaY": [],
+            "orientation": [],
             "angularVelocity": []
         }
     
@@ -551,13 +608,13 @@ class ParaboloidLightSail(): #Paraboloid Reflector
                 normal = np.array([2 * self.a * x, 2 * self.a * y, 1.0])
                 normal = normal / np.linalg.norm(normal)
                 
-                normal = rotateX(normal, self.thetaX)
-                normal = rotateY(normal, self.thetaY)
+                normal = rotateVector(normal, self.orientation)
                 
                 position = np.array([x, y, z])
                 
-                position = rotateX(position, self.thetaX)
-                position = rotateY(position, self.thetaY)
+                position = rotateVector(position, self.orientation)
+                
+                rotatedPos = position.copy()
                 
                 position += self.positionOffset
                 
@@ -574,7 +631,7 @@ class ParaboloidLightSail(): #Paraboloid Reflector
                 
                 F = calcForce(I, normal, dA)
                 
-                tau = np.cross(position, F)
+                tau = np.cross(rotatedPos, F)
                 
                 Force += F
                 Torque += tau
@@ -594,83 +651,78 @@ class ParaboloidLightSail(): #Paraboloid Reflector
             self.Torque[np.abs(self.Torque) < tol] = 0.0
         return self.Force, self.Torque
 
-    def derivatives(self, position, velocity, thetaX, thetaY, angularVelocity):
+    def derivatives(self, position, velocity, orientation, angularVelocity):
         oldPosition = self.positionOffset.copy()
         oldVelocity = self.velocity.copy()
-        oldThetaX = self.thetaX
-        oldThetaY = self.thetaY
+        oldOrientation = self.orientation.copy()
         oldAngVel = self.angularVelocity.copy()
         
         self.positionOffset = position
         self.velocity = velocity
-        self.thetaX = thetaX
-        self.thetaY = thetaY
+        self.orientation = orientation
         self.angularVelocity = angularVelocity
         
         self.compute()
         
         dpos = self.velocity.copy() #dx/dt = v
         dvel = self.Force / self.mass #dv/dt = a
-        dthX = self.angularVelocity[0] #d(thetaX)/dt = omegaX
-        dthY = self.angularVelocity[1] #d(thetaY)/dt = omegaY
+        omegaQuat = np.array([0.0, angularVelocity[0], angularVelocity[1], angularVelocity[2]])
+        qDot = 0.5 * quaternionMultiply(omegaQuat, orientation)
         dangVel = self.Torque / self.momentOfInertia #d(omega)/dt = alpha # lmao "dang"
         
         self.positionOffset = oldPosition
         self.velocity = oldVelocity
-        self.thetaX = oldThetaX
-        self.thetaY = oldThetaY
+        self.orientation = oldOrientation
         self.angularVelocity = oldAngVel
         
-        return dpos, dvel, dthX, dthY, dangVel
+        return dpos, dvel, qDot, dangVel
     
     def update(self, dt, time):
         pos = self.positionOffset.copy()
         velocity = self.velocity.copy()
-        thetaX = self.thetaX
-        thetaY = self.thetaY
+        orientation = self.orientation.copy()
         angularVelocity = self.angularVelocity.copy()
         
         #k1
-        dpos1, dvel1, dthX1, dthY1, dangVel1 = self.derivatives(pos, velocity, thetaX, thetaY, angularVelocity)
+        dpos1, dvel1, dq1, dangVel1 = self.derivatives(pos, velocity, orientation, angularVelocity)
         
         #k2
         p2 = pos + 0.5 * dt * dpos1
         v2 = velocity + 0.5 * dt * dvel1
-        thx2 = thetaX + 0.5 * dt * dthX1
-        thy2 = thetaY + 0.5 * dt * dthY1
+        q2 = orientation + 0.5 * dt * dq1
+        q2 = normalizeQuaternion(q2)
         w2 = angularVelocity + 0.5 * dt * dangVel1
         
-        dpos2, dvel2, dthX2, dthY2, dangVel2 = self.derivatives(p2, v2, thx2, thy2, w2)
+        dpos2, dvel2, dq2, dangVel2 = self.derivatives(p2, v2, q2, w2)
         
         #k3
         p3 = pos + 0.5 * dt * dpos2
         v3 = velocity + 0.5 * dt * dvel2
-        thx3 = thetaX + 0.5 * dt * dthX2
-        thy3 = thetaY + 0.5 * dt * dthY2
+        q3 = orientation + 0.5 * dt * dq2
+        q3 = normalizeQuaternion(q3)
         w3 = angularVelocity + 0.5 * dt * dangVel2
         
-        dpos3, dvel3, dthX3, dthY3, dangVel3 = self.derivatives(p3, v3, thx3, thy3, w3)
+        dpos3, dvel3, dq3, dangVel3 = self.derivatives(p3, v3, q3, w3)
         
         #k4
         p4 = pos + dt * dpos3
         v4 = velocity + dt * dvel3
-        thx4 = thetaX + dt * dthX3
-        thy4 = thetaY + dt * dthY3
+        q4 = orientation + dt * dq3
+        q4 = normalizeQuaternion(q4)
         w4 = angularVelocity + dt * dangVel3
         
-        dpos4, dvel4, dthX4, dthY4, dangVel4 = self.derivatives(p4, v4, thx4, thy4, w4)
+        dpos4, dvel4, dq4, dangVel4 = self.derivatives(p4, v4, q4, w4)
         
         #weighted average or something idk im just following a random RK4 tutorial i aint that smart
         finalpos = pos + (dt/ 6.0) * (dpos1 + 2*dpos2 + 2*dpos3 + dpos4)
         finalvelocity = velocity + (dt/ 6.0) * (dvel1 + 2*dvel2 + 2*dvel3 + dvel4)
-        finalthetaX = thetaX + (dt/ 6.0) * (dthX1 + 2*dthX2 + 2*dthX3 + dthX4)
-        finalthetaY = thetaY + (dt/ 6.0) * (dthY1 + 2*dthY2 + 2*dthY3 + dthY4)
+        finalOrientation = orientation + (dt / 6.0) * (dq1 + 2*dq2 + 2*dq3 + dq4)
+        finalOrientation = normalizeQuaternion(finalOrientation)
         finalangVel = angularVelocity + (dt/ 6.0) * (dangVel1 + 2*dangVel2 + 2*dangVel3 + dangVel4)
         
         self.positionOffset = finalpos
         self.velocity = finalvelocity
-        self.thetaX = finalthetaX
-        self.thetaY = finalthetaY
+        self.orientation = finalOrientation
         self.angularVelocity = finalangVel
 
         self.history["time"].append(time)
@@ -678,8 +730,7 @@ class ParaboloidLightSail(): #Paraboloid Reflector
         self.history["velocity"].append(self.velocity.copy())
         self.history["force"].append(self.Force.copy())
         self.history["torque"].append(self.Torque.copy())
-        self.history["thetaX"].append(self.thetaX)
-        self.history["thetaY"].append(self.thetaY)
+        self.history["orientation"].append(self.orientation.copy())
         self.history["angularVelocity"].append(self.angularVelocity.copy())
 
     def Visualize(self):
@@ -708,17 +759,19 @@ class ParaboloidLightSail(): #Paraboloid Reflector
         plt.show()
 
 def simLoop(timestep, steps, sail):
-    time = 0
+    time = Decimal('0.0')
     dt = timestep
     print("="*90)
     for step in range(steps):
+        time = np.linalg.norm(time)
         print(f"{sail.positionOffset} (Time: {time})")
         sail.compute()
         sail.update(dt, time)
         
-        time += dt
+        
+        time += Decimal(str(dt))
     sail.Visualize()
-
+    
 
 if __name__ == '__main__':
 
@@ -735,10 +788,10 @@ if __name__ == '__main__':
 
     nyxDisc1 = ParaboloidLightSail(5, 0, 100, np.radians(0), np.radians(0))
 
-    dt = 1.0
-    steps = 100
+    dt = 0.1
+    steps = 10
     simLoop(dt, steps, nyxRect1)
-    simLoop(dt, steps, nyxParaboloid1)
+    # simLoop(dt, steps, nyxParaboloid1)
     # simLoop(dt, steps, nyxSphere1)
     # simLoop(dt, steps, nyxDisc1)
 
