@@ -1,22 +1,33 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 from decimal import Decimal
 
+#Constants
 c = 3e8 #The Speed of Light in m/s. This is a constant for the simulation, and can be changed to test different scenarios.
 
 I0 = 1e9 #The Intensity at The Exact Center of the Beam. This is a constant for the simulation, and can be changed to test different scenarios.
 w0 = 1.0 #The beam waist, which is the radius at which the intensity falls to 1/e^2 of its maximum value. This is also a constant for the simulation, and can be changed to test different scenarios.
+lambdaLaser = 1e-6 # 1 micron laser
+zR = np.pi * w0**2/lambdaLaser #Rayleigh range
+sigma = 5.670374419e-8
 
 beamX = 0
 beamY = 0
 beamDih = np.array([0.0, 0.0, 1.0]) #Beam direction, i thought it would be funny to name it "Beam Dih"
 beamDih = beamDih / np.linalg.norm(beamDih)
 
+
+def beamradi(z):
+    return w0 * np.sqrt(1 + (z / zR)**2)
+
 #Gaussian Beam Equation: I(r) = I0 * exp(-2 * r^2 / w0^2), How the intensity of the beam changes with distance from the center. This is a fundamental equation for simulating the interaction of light with the sail, and is used to calculate the force and torque on each element of the sail based on its position relative to the center of the beam.
-def gaussian(x, y):
-    r = np.sqrt((x-beamX)**2 + (y-beamY)**2)
+def gaussian(x, y, z=0):
+    wz = beamradi(z)
     
-    return I0 * np.exp(-2 * r**2 / w0**2)
+    r = np.sqrt((x - beamX)**2 + (y - beamY)**2)
+    
+    return I0 * (w0 / wz)**2 * np.exp(-2 * r**2 / wz**2)
 
 def rotateX(vector, angle):
     x, y, z = vector 
@@ -35,22 +46,39 @@ def rotateY(vector, angle):
         -x*np.sin(angle) + z*np.cos(angle)
     ])
 
-def calcForce(I, normal, dA):
+def calcForce(I, normal, dA, reflectivity, absorptivity):
     if not np.all(np.isfinite(normal)):
         return np.array([0.0, 0.0, 0.0])
+    
     norm = np.linalg.norm(normal)
+    
     if not np.isfinite(norm) or norm < 1e-15:
         return np.array([0.0, 0.0, 0.0])
     normal = normal / norm
 
     cosTheta = np.dot(normal, beamDih)
+    
+    incoming = -beamDih / np.linalg.norm(beamDih)
+    
+    reflected = incoming - 2 * np.dot(incoming, normal) * normal
+    reflected =  reflected / np.linalg.norm(reflected)
+    
     if not np.isfinite(cosTheta):
         return np.array([0.0, 0.0, 0.0])
+    
+    
     cosTheta = np.clip(cosTheta, -1.0, 1.0)
+
     if cosTheta <= 1e-10:
         return np.array([0.0, 0.0, 0.0])
-
-    return 2 * (I / c) * (cosTheta ** 2) * dA * normal
+    
+    deltaP = reflected - incoming
+    fmag = (I / c) * cosTheta * dA
+    
+    reflectedForce = reflectivity * fmag * deltaP
+    absorbedForce = absorptivity * fmag * incoming
+    
+    return reflectedForce + absorbedForce
 
 
 def _is_centered_untilted(sail, tol=1e-8):
@@ -126,6 +154,7 @@ def eul2quat(thetaX, thetaY, thetaZ=0):
     
     return np.array([w, x, y, z])
 
+
 class RectangleLightSail():
     def __init__(self, width, height, resolution, StartingX=0, StartingY=0, thetaX=0, thetaY=0):
         self.width = width
@@ -141,7 +170,18 @@ class RectangleLightSail():
         self.angularVelocity = np.array([0.0, 0.0, 0.0])
         self.angularAcceleration = np.array([0.0, 0.0, 0.0])
         
-        self.momentOfInertia = (1/12) * self.mass * (self.width**2 + self.height**2)
+        Ixx = (1/12) * self.mass * (self.height**2)
+        Iyy = (1/12) * self.mass * (self.width**2)
+        Izz = (1/12) * self.mass * (self.width**2 + self.height**2)
+        
+        self.inertiaTensor = np.array([
+            [Ixx, 0.0, 0.0],
+            [0.0, Iyy, 0.0],
+            [0.0, 0.0, Izz]
+        ])
+        
+        self.reflectivity = 0.95
+        self.absorptivity = 0.05
         
         self.thetaX = thetaX
         self.thetaY = thetaY
@@ -158,6 +198,8 @@ class RectangleLightSail():
         self.intensities = []
         self.forceVectors = []
         
+        self.temperatureMap = []
+        
         self.history = {
             "time": [],
             "position": [],
@@ -173,6 +215,7 @@ class RectangleLightSail():
         self.zPoints=[]
         self.intensities = []
         self.forceVectors = []
+        self.temperatureMap = []
         
         x = self.CenterX
         y = self.CenterY
@@ -200,17 +243,20 @@ class RectangleLightSail():
                 position += self.positionOffset
                 
                 r = np.sqrt(position[0]**2 + position[1]**2)
-                I = gaussian(position[0], position[1])
+                I = gaussian(position[0], position[1], position[2])
+                absorbedPower = self.absorptivity * I * dA
+                temp = (absorbedPower / sigma) ** 0.25
                 
                 self.xPoints.append(position[0])
                 self.yPoints.append(position[1])
                 self.zPoints.append(position[2])
                 
                 self.intensities.append(I)
+                self.temperatureMap.append(temp)
                 
                 normal = rotateVector(normal, self.orientation)
                 
-                F = calcForce(I, normal, dA)
+                F = calcForce(I, normal, dA, self.reflectivity, self.absorptivity)
                 
                 self.forceVectors.append(F)
                 
@@ -250,7 +296,7 @@ class RectangleLightSail():
         dvel = self.Force / self.mass #dv/dt = a
         omegaQuat = np.array([0.0, angularVelocity[0], angularVelocity[1], angularVelocity[2]])
         qDot = 0.5 * quaternionMultiply(omegaQuat, orientation)
-        dangVel = self.Torque / self.momentOfInertia #d(omega)/dt = alpha # lmao "dang"
+        dangVel = np.linalg.solve(self.inertiaTensor, self.Torque) #d(omega)/dt = alpha # lmao "dang"
         
         self.positionOffset = oldPosition
         self.velocity = oldVelocity
@@ -354,8 +400,15 @@ class SphereLightSail():
         self.angularVelocity = np.array([0.0, 0.0, 0.0])
         self.angularAcceleration = np.array([0.0, 0.0, 0.0])
         
-        self.momentOfInertia = (2/3) * self.mass * self.radius**2
+        I = (2/3) * self.mass * self.radius*2
         
+        self.inertiaTensor = np.array([
+            [I, 0.0, 0.0],
+            [0.0, I, 0.0],
+            [0.0, 0.0, I]
+        ])
+        self.reflectivity = 0.95
+        self.absorptivity = 0.05
         self.orientation = eul2quat(thetaX, thetaY) #w, x, y, z
         
         self.Force = None
@@ -366,6 +419,7 @@ class SphereLightSail():
         self.zPoints=[]
         
         self.intensities = []
+        self.temperatureMap = []
         
         self.history = {
             "time": [],
@@ -382,6 +436,7 @@ class SphereLightSail():
         self.yPoints=[]
         self.zPoints=[]
         self.intensities = []
+        self.temperatureMap = []
         
         Force = np.array([0.0, 0.0, 0.0])
         Torque = np.array([0.0, 0.0, 0.0])
@@ -412,8 +467,7 @@ class SphereLightSail():
                 normal = rotateVector(normal, self.orientation)
                 
                 r = np.sqrt(position[0]**2 + position[1]**2)
-                I = gaussian(position[0], position[1])
-                
+                I = gaussian(position[0], position[1], position[2])
                 self.intensities.append(I)
                 
                 dtheta = (np.pi / 2) / self.resolution
@@ -421,7 +475,12 @@ class SphereLightSail():
                 
                 dA = self.radius**2 * np.sin(theta) * dtheta * dphi
                 
-                F = calcForce(I, normal, dA)
+                absorbedPower = self.absorptivity * I * dA
+                temp = (absorbedPower / sigma) ** 0.25
+                
+                self.temperatureMap.append(temp)
+                
+                F = calcForce(I, normal, dA, self.reflectivity, self.absorptivity)
                 
                 tau = np.cross(rotatedPos, F)
                 
@@ -458,7 +517,7 @@ class SphereLightSail():
         dvel = self.Force / self.mass #dv/dt = a
         omegaQuat = np.array([0.0, angularVelocity[0], angularVelocity[1], angularVelocity[2]])
         qDot = 0.5 * quaternionMultiply(omegaQuat, orientation)
-        dangVel = self.Torque / self.momentOfInertia #d(omega)/dt = alpha # lmao "dang"
+        dangVel = np.linalg.solve(self.inertiaTensor, self.Torque) #d(omega)/dt = alpha # lmao "dang"
         
         self.positionOffset = oldPosition
         self.velocity = oldVelocity
@@ -561,8 +620,17 @@ class ParaboloidLightSail(): #Paraboloid Reflector
         
         h = self.a * self.radius**2
         
-        self.momentOfInertia = self.mass * ((self.radius**2)/4 + (h**2)/18) 
+        Ixx = self.mass * ((self.radius**2)/4 + (h**2)/18)
+        Iyy = Ixx
+        Izz = 0.5 * self.mass * self.radius**2
         
+        self.inertiaTensor = np.array([
+            [Ixx, 0.0, 0.0],
+            [0.0, Iyy, 0.0],
+            [0.0, 0.0, Izz]
+        ])
+        self.reflectivity = 0.95
+        self.absorptivity = 0.05
         self.orientation = eul2quat(thetaX, thetaY) #w, x, y, z
         
         self.velocity = np.array([0.0, 0.0, 0.0])
@@ -575,6 +643,7 @@ class ParaboloidLightSail(): #Paraboloid Reflector
         self.yPoints=[]
         self.zPoints=[]
         self.intensities = []
+        self.temperatureMap = []
         
         self.history = {
             "time": [],
@@ -592,6 +661,7 @@ class ParaboloidLightSail(): #Paraboloid Reflector
         self.zPoints=[]
         self.intensities = []
         
+        self.temperatureMap = []
         Force = np.array([0.0, 0.0, 0.0])
         Torque = np.array([0.0, 0.0, 0.0])
         
@@ -622,14 +692,16 @@ class ParaboloidLightSail(): #Paraboloid Reflector
                 self.yPoints.append(position[1])
                 self.zPoints.append(position[2])
                 
-                I = gaussian(position[0], position[1])
+                I = gaussian(position[0], position[1], position[2])
                 
                 dr = self.radius / self.resolution
                 dphi = 2 * np.pi / self.resolution
                 
                 dA = np.sqrt(1 + (2*self.a*x)**2 + (2*self.a*y)**2) * r * dr * dphi
                 
-                F = calcForce(I, normal, dA)
+                absorbedPower = self.absorptivity * I * dA
+                temp = (absorbedPower / sigma) ** 0.25
+                F = calcForce(I, normal, dA, self.reflectivity, self.absorptivity)
                 
                 tau = np.cross(rotatedPos, F)
                 
@@ -637,6 +709,7 @@ class ParaboloidLightSail(): #Paraboloid Reflector
                 Torque += tau
                 
                 self.intensities.append(I)
+                self.temperatureMap.append(temp)
         self.Force = Force
         self.Torque = Torque
         
@@ -668,7 +741,7 @@ class ParaboloidLightSail(): #Paraboloid Reflector
         dvel = self.Force / self.mass #dv/dt = a
         omegaQuat = np.array([0.0, angularVelocity[0], angularVelocity[1], angularVelocity[2]])
         qDot = 0.5 * quaternionMultiply(omegaQuat, orientation)
-        dangVel = self.Torque / self.momentOfInertia #d(omega)/dt = alpha # lmao "dang"
+        dangVel = np.linalg.solve(self.inertiaTensor, self.Torque) #d(omega)/dt = alpha # lmao "dang"
         
         self.positionOffset = oldPosition
         self.velocity = oldVelocity
@@ -764,7 +837,7 @@ def simLoop(timestep, steps, sail):
     print("="*90)
     for step in range(steps):
         time = np.linalg.norm(time)
-        print(f"{sail.positionOffset} (Time: {time})")
+        print(f"Position: {sail.positionOffset} \n Omega: {sail.angularVelocity} \n Torque: {sail.Torque} \n (Time: {time}) \n {'='*45}")
         sail.compute()
         sail.update(dt, time)
         
@@ -789,10 +862,10 @@ if __name__ == '__main__':
     nyxDisc1 = ParaboloidLightSail(5, 0, 100, np.radians(0), np.radians(0))
 
     dt = 0.1
-    steps = 10
+    steps = 5
     simLoop(dt, steps, nyxRect1)
-    # simLoop(dt, steps, nyxParaboloid1)
-    # simLoop(dt, steps, nyxSphere1)
+    simLoop(dt, steps, nyxParaboloid1)
+    simLoop(dt, steps, nyxSphere1)
     # simLoop(dt, steps, nyxDisc1)
 
     # TotalForce, TotalTorque = nyxParaboloid1.compute()
