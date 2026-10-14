@@ -17,14 +17,6 @@
 - **Thermal estimates:** local surface-temperature estimates and comparison with the configured material temperature limit.
 - **Desktop workbench:** configure a run, inspect results and plots, and export data for further analysis.
 
-## Screenshots
-
-_Add a screenshot of the Nyx interface here when you're ready._
-
-<!-- Example:
-![Nyx interface](docs/images/nyx-interface.png)
--->
-
 ## Geometries and presets
 
 | Geometry | Model | Main parameters |
