@@ -3,6 +3,23 @@ import numpy as np
 
 plt.style.use("dark_background")
 
+def quaternionToEuler(q):
+    w, x, y, z = q
+    
+    sinr = 2 * (w*x+y*z)
+    cosr = 1 - 2 * (x*x + y*y)
+    roll = np.arctan2(sinr,cosr)
+    
+    sinp = 2 * (w*y-z*x)
+    sinp = np.clip(sinp, -1.0, 1.0)
+    pitch = np.arcsin(sinp)
+    
+    siny = 2*(w*z+x*y)
+    cosy= 1-2*(y*y+z*z)
+    yaw = np.arctan2(siny, cosy)
+    
+    return np.degrees([roll, pitch, yaw])
+
 def setupPlot(title, xlabel, ylabel):
     fig, ax = plt.subplots(figsize=(10, 5.5))
     
@@ -161,7 +178,7 @@ def plotAngularVelocityHistory(sail):
 
 def plotTemperatureHistory(sail):
     if len(sail.history['maxTemperature']) == 0:
-        print("No temperature history to plot.")
+        print("No temperature available.")
         return
     
     t = np.array(sail.history["time"])
@@ -184,7 +201,7 @@ def plotTemperatureHistory(sail):
 
 def plotTemperatureHistogram(sail):
     if len(sail.history['maxTemperature']) == 0:
-        print("No temperature history to plot.")
+        print("No temperature data available")
         return
     
     temperatures = np.array(sail.temperatureMap)
@@ -196,6 +213,162 @@ def plotTemperatureHistogram(sail):
     mean = np.mean(temperatures)
     
     ax.axvline(mean, color="#58a6ff", linestyle='--', linewidth=2, label=f"Mean = {mean:.2f} K")
+    
+    legend = ax.legend(frameon=True)
+    legend.get_frame().set_facecolor('#21262d')
+    legend.get_frame().set_edgecolor('#30363d')
+    
+    plt.tight_layout()
+    plt.show()
+
+def plotIntensityHistogram(sail):
+    if len(sail.intensities) == 0:
+        print("No intensity data available.")
+        return
+    
+    intensities = np.array(sail.intensities)
+
+    fig, ax = setupPlot("Laser Intensity Distribution", "Intensity (W/mu\u00B2 )", "Number Of Elements (Mesh Cells)")
+    
+    ax.hist(intensities, bins=30, color='#ff7b72', edgecolor='white', linewidth=0.5, alpha=0.85)
+    
+    mean = np.mean(intensities)
+    
+    ax.axvline(mean, color="#58a6ff", linestyle='--', linewidth=2, label=f"Mean = {mean:.3e} W/m\u00B2")
+    
+    legend = ax.legend(frameon=True)
+    legend.get_frame().set_facecolor('#21262d')
+    legend.get_frame().set_edgecolor('#30363d')
+    
+    plt.tight_layout()
+    plt.show()
+
+def plotKineticEnergyHistory(sail):
+    if len(sail.history['velocity']) == 0:
+        print("No velocity history to plot.")
+        return
+    
+    t = np.array(sail.history["time"])
+    velocity = np.array(sail.history["velocity"])
+    
+    speed = np.linalg.norm(velocity, axis=1)
+    energy = 0.5 * sail.mass * speed**2
+    
+    fig, ax = setupPlot("Translational Kinetic Energy", "Time (s)", "Energy (J)")
+    
+    ax.plot(t, energy, linewidth=2.5, color='#58a6ff', label='Kinetic Energy')
+    
+    ax.fill_between(t, energy, color='#58a6ff', alpha=0.2)
+    
+    legend = ax.legend(frameon=True)
+    legend.get_frame().set_facecolor('#21262d')
+    legend.get_frame().set_edgecolor('#30363d')
+    
+    plt.tight_layout()
+    plt.show()
+
+def plotRotationalEnergyHistory(sail):
+    if len(sail.history['angularVelocity']) == 0:
+        print("No angular velocity data available.")
+        return
+    
+    t = np.array(sail.history["time"])
+    omega = np.array(sail.history["angularVelocity"])
+    
+    rotationalEnergy = []
+    
+    for i in omega:
+        rotationalEnergy.append(0.5 * i.T @ sail.inertiaTensor @ i)
+    
+    rotationalEnergy = np.array(rotationalEnergy)
+    
+    fig, ax = setupPlot("Rotational Kinetic Energy", "Time (s)", "Energy (J)")
+    
+    ax.plot(t, rotationalEnergy, linewidth=2.5, color='#58a6ff', label='Rotational Energy')
+    
+    ax.fill_between(t, rotationalEnergy, color='#58a6ff', alpha=0.2)
+    
+    legend = ax.legend(frameon=True)
+    legend.get_frame().set_facecolor('#21262d')
+    legend.get_frame().set_edgecolor('#30363d')
+    
+    plt.tight_layout()
+    plt.show()
+
+def plotTotalEnergy(sail):
+    if len(sail.history['velocity']) == 0:
+        print("No velocity history to plot.")
+        return
+    
+    t = np.array(sail.history["time"])
+    velocity = np.array(sail.history["velocity"])
+    omega = np.array(sail.history["angularVelocity"])
+    
+    speed = np.linalg.norm(velocity, axis=1)
+    energy = 0.5 * sail.mass * speed**2
+    
+    rotationalEnergy = []
+    
+    for i in omega:
+        rotationalEnergy.append(0.5 * i.T @ sail.inertiaTensor @ i)
+    
+    rotationalEnergy = np.array(rotationalEnergy)
+    
+    totalEnergy = energy+rotationalEnergy
+    
+    fig, ax = setupPlot("Total Kinetic Energy", "Time (s)", "Energy (J)")
+    
+    ax.plot(t, totalEnergy, linewidth=2.5, color='#58a6ff', label='Total Energy')
+    
+    ax.fill_between(t, totalEnergy, color='#58a6ff', alpha=0.2)
+    
+    legend = ax.legend(frameon=True)
+    legend.get_frame().set_facecolor('#21262d')
+    legend.get_frame().set_edgecolor('#30363d')
+    
+    plt.tight_layout()
+    plt.show()
+
+def plotBeamOffset(sail):
+    if len(sail.history["position"]) == 0:
+        print("No Position history available")
+        return
+    
+    t = np.array(sail.history["time"])
+    position = np.array(sail.history["position"])
+    
+    offset = np.sqrt(position[:,0]**2 + position[:,1]**2)
+    
+    fig, ax = setupPlot("Beam Offset vs Time", "Time (s)", "Offset (m)")
+    
+    ax.plot(t, offset, linewidth=2.5, color="#58a6ff", label="Beam Offset")
+    
+    ax.fill_between(t, offset, color="#58a6ff", alpha=0.2)
+    
+    legend = ax.legend(frameon=True)
+    legend.get_frame().set_facecolor('#21262d')
+    legend.get_frame().set_edgecolor('#30363d')
+    
+    plt.tight_layout()
+    plt.show()
+
+def plotEulerHistory(sail):
+    if len(sail.history['orientation']) == 0:
+        print("No orientation history to plot.")
+        return
+    
+    t = np.array(sail.history['time'])
+    
+    euler = np.array([
+        quaternionToEuler(q)
+        for q in sail.history["orientation"]
+        ])
+    
+    fig, ax = setupPlot("Euler Angles vs Time", "Time (s)", f"Angle ({chr(176)})")
+    
+    ax.plot(t, euler[:, 0], label='Roll', color='cyan')
+    ax.plot(t, euler[:, 1], label='Pitch', color='red')
+    ax.plot(t, euler[:, 2], label='Yaw', color='yellow')
     
     legend = ax.legend(frameon=True)
     legend.get_frame().set_facecolor('#21262d')
