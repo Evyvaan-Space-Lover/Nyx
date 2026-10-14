@@ -171,15 +171,6 @@ If you use Nyx in a report, presentation, or research project, cite the reposito
 
 **Evyvaan Singh, _Nyx: Light-Sail Dynamics Workbench_, GitHub repository.**  
 https://github.com/Evyvaan-Space-Lover/Nyx
-<<<<<<< HEAD
 
-## License
-
-No license is stated here. Until a license is added to the repository, do not assume that reuse, redistribution, or modification is automatically permitted. Add a `LICENSE` file if you want to specify the terms under which others may use the project.
-
----
-
-*Built to explore the physics of light sails—one model, one assumption, and one experiment at a time.*
-=======
 ### No AI was used for the code itself. AI was only used for the documentation. 
 >>>>>>> 1e158c036c9ca75488abfc6c8708dd13d325e914
