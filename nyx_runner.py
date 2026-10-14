@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import traceback
+from itertools import product
 
 import numpy as np
 import SimMain as physics
@@ -48,6 +49,62 @@ def _step_count(settings, dt):
     return steps
 
 
+SWEEP_FIELDS = {
+    "width": float,
+    "height": float,
+    "radius": float,
+    "a": float,
+    "thickness": float,
+    "resolution": int,
+    "theta_x": float,
+    "theta_y": float,
+    "beam_x": float,
+    "beam_y": float,
+    "I0": float,
+    "w0": float,
+    "lambdaLaser": float,
+    "steps": int,
+    "dt": float,
+}
+
+
+def _parse_sweep(text):
+    fields = {}
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if "=" not in line:
+            raise ValueError(f"Sweep line {line_number} must use name = values.")
+        name, raw_values = (part.strip() for part in line.split("=", 1))
+        if name not in SWEEP_FIELDS:
+            raise ValueError(f"Unsupported sweep parameter on line {line_number}: {name!r}.")
+        if name in fields:
+            raise ValueError(f"Sweep parameter {name!r} is listed more than once.")
+        values = []
+        for value_text in raw_values.split(","):
+            value_text = value_text.strip()
+            if not value_text:
+                raise ValueError(f"Sweep line {line_number} contains an empty value.")
+            try:
+                value = SWEEP_FIELDS[name](value_text)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Invalid value {value_text!r} for {name} on line {line_number}."
+                ) from exc
+            if isinstance(value, float) and not math.isfinite(value):
+                raise ValueError(f"Sweep values for {name} must be finite.")
+            values.append(value)
+        fields[name] = values
+    if not fields:
+        raise ValueError("Enter at least one parameter and value for the sweep.")
+    names = tuple(fields)
+    return [
+        dict(zip(names, combination))
+        for combination in product(*(fields[name] for name in names))
+    ]
+
+
 def _make_sail(geometry, material_name, s):
     material = MATERIALS[material_name]
     tx, ty = math.radians(_number(s, "theta_x")), math.radians(_number(s, "theta_y"))
@@ -88,7 +145,7 @@ def _apply_beam(s):
     physics.beamY = _number(s, "beam_y")
 
 
-def _run_one(geometry, material_name, s, app, run_index, run_total):
+def _run_one(geometry, material_name, s, app, run_index, run_total, progress_base, total_steps):
     sail = _make_sail(geometry, material_name, s)
     dt = float(_number(s, "dt"))
     if dt <= 0:
@@ -114,8 +171,7 @@ def _run_one(geometry, material_name, s, app, run_index, run_total):
         time += dt
         progress_interval = max(1, steps // 100)
         if step % progress_interval == 0 or step == steps - 1:
-            completed_steps = (run_index - 1) * steps + step + 1
-            total_steps = run_total * steps
+            completed_steps = progress_base + step + 1
             app.set_progress(
                 completed_steps,
                 total_steps,
@@ -144,43 +200,85 @@ def _run_one(geometry, material_name, s, app, run_index, run_total):
     return {
         "geometry": geometry, "material": material_name, "mass": float(sail.mass),
         "final_force": np.asarray(sail.Force).tolist(), "final_torque": np.asarray(sail.Torque).tolist(),
+        "parameters": s.get("_sweep_parameters", {}),
+        "visualization": {
+            "x": np.asarray(sail.xPoints, dtype=float).tolist(),
+            "y": np.asarray(sail.yPoints, dtype=float).tolist(),
+            "z": np.asarray(sail.zPoints, dtype=float).tolist(),
+            "intensity": np.asarray(sail.intensities, dtype=float).tolist(),
+            "trajectory": np.asarray(h["position"], dtype=float).tolist(),
+            "force": np.asarray(sail.Force, dtype=float).tolist(),
+            "torque": np.asarray(sail.Torque, dtype=float).tolist(),
+        },
         "history": {k: [np.asarray(v).tolist() if isinstance(v, np.ndarray) else float(v) if isinstance(v, (np.floating,)) else v for v in values]
                     for k, values in h.items()},
         "thermal_limit": float(MATERIALS[material_name].maxTemperature),
     }
 
 
-def run_simulation(app, settings):
+def _execute_configurations(app, settings, sweep_values=None):
     try:
         if hasattr(app, "clear_step_log"):
             app.clear_step_log()
         if hasattr(app, "tabs") and hasattr(app, "steps_tab"):
             app.tabs.select(app.steps_tab)
-        _apply_beam(settings)
-        pairs = [(g, m) for g in settings["geometries"] for m in settings["materials"]]
+        sweep_values = sweep_values or [{}]
+        configurations = [
+            (
+                geometry,
+                material,
+                {**settings, **values, "_sweep_parameters": values},
+            )
+            for values in sweep_values
+            for geometry in settings["geometries"]
+            for material in settings["materials"]
+        ]
         max_runs = _number(settings, "max_runs", int)
-        if len(pairs) > max_runs:
-            raise ValueError(f"Selected {len(pairs)} configurations, but Maximum run count is {max_runs}.")
-        dt = _number(settings, "dt")
-        if dt <= 0:
-            raise ValueError("Timestep must be positive.")
-        steps_per_run = _step_count(settings, dt)
-        total_steps = len(pairs) * steps_per_run
+        if len(configurations) > max_runs:
+            raise ValueError(
+                f"Selected {len(configurations)} configurations, but Maximum run count is {max_runs}."
+            )
+        step_counts = []
+        for _, _, config in configurations:
+            dt = _number(config, "dt")
+            if dt <= 0:
+                raise ValueError("Timestep must be positive.")
+            step_counts.append(_step_count(config, dt))
+        total_steps = sum(step_counts)
         app.set_progress(0, total_steps, f"Starting Nyx — 0/{total_steps} iterations.")
         results = []
-        for i, (geometry, material) in enumerate(pairs, start=1):
-            results.append(_run_one(geometry, material, settings, app, i, len(pairs)))
+        progress_base = 0
+        for i, ((geometry, material, config), steps) in enumerate(
+            zip(configurations, step_counts), start=1
+        ):
+            _apply_beam(config)
+            result = _run_one(
+                geometry,
+                material,
+                config,
+                app,
+                i,
+                len(configurations),
+                progress_base,
+                total_steps,
+            )
+            results.append(result)
+            progress_base += steps
         app.last_nyx_results = results
         app.refresh_plot()
+        if results and hasattr(app, "show_sail_visualization"):
+            app.show_sail_visualization(results[-1])
         app.set_progress(
             total_steps,
             total_steps,
-            f"Completed {len(pairs)} configuration(s), {total_steps} integration iterations.",
+            f"Completed {len(configurations)} configuration(s), {total_steps} integration iterations.",
         )
+        if hasattr(app, "tabs") and hasattr(app, "visualization_tab"):
+            app.tabs.select(app.visualization_tab)
         messagebox.showinfo(
             "Nyx complete",
-            f"Finished {len(pairs)} simulation(s). Step-by-step output is on the "
-            "Simulation steps tab; plots and exports are on Results & visualisation.\n\n"
+            f"Finished {len(configurations)} simulation(s). The sail visualisation is "
+            "on its own tab; step-by-step output, plots, and exports are also available.\n\n"
             "To save results, choose an export button in Results & visualisation. "
             "CSV and JSON files are not saved automatically; you choose their location "
             "in the Save dialog.",
@@ -190,6 +288,20 @@ def run_simulation(app, settings):
         traceback.print_exc()
         app.set_status("Run failed.")
         messagebox.showerror("Nyx run failed", f"{exc}\n\nCheck that SimMain.py and its dependencies are in the project folder.", parent=app.root)
+
+
+def run_simulation(app, settings):
+    _execute_configurations(app, settings)
+
+
+def run_parameter_sweep(app, settings):
+    try:
+        sweep_values = _parse_sweep(settings.get("sweep_text", ""))
+    except ValueError as exc:
+        app.set_status("Parameter sweep failed.")
+        messagebox.showerror("Invalid parameter sweep", str(exc), parent=app.root)
+        return
+    _execute_configurations(app, settings, sweep_values)
 
 
 def export_results(kind, settings, app):

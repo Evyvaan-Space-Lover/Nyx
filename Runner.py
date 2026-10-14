@@ -17,6 +17,8 @@ PLOTS = (
     "Thermal margin",
 )
 MAX_STEP_LOG_LINES = 5000
+UI_FONT = ("Segoe UI", 9)
+SMALL_FONT = ("Segoe UI", 8)
 
 
 class NyxInterface:
@@ -42,19 +44,20 @@ class NyxInterface:
             s.theme_use("clam")
         except tk.TclError:
             pass
+        s.configure(".", font=UI_FONT)
         s.configure("TFrame", background=BG)
-        s.configure("TLabel", background=BG, foreground=TEXT)
+        s.configure("TLabel", background=BG, foreground=TEXT, font=UI_FONT)
         s.configure("TCheckbutton", background=BG, foreground=TEXT)
-        s.configure("TButton", padding=7)
+        s.configure("TButton", padding=(8, 4), font=UI_FONT)
         s.configure("TNotebook", background=BG, borderwidth=0)
-        s.configure("TNotebook.Tab", padding=(13, 8))
+        s.configure("TNotebook.Tab", padding=(10, 5), font=UI_FONT)
         s.configure("TLabelframe", background=BG, foreground=ACCENT)
-        s.configure("TLabelframe.Label", background=BG, foreground=ACCENT)
+        s.configure("TLabelframe.Label", background=BG, foreground=ACCENT, font=UI_FONT)
         s.configure("TEntry", fieldbackground=PANEL, foreground=TEXT)
         s.configure("TCombobox", fieldbackground=PANEL, foreground=TEXT)
         s.configure("Treeview", background=PANEL, fieldbackground=PANEL,
-                    foreground=TEXT, rowheight=25)
-        s.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"))
+                    foreground=TEXT, rowheight=22, font=UI_FONT)
+        s.configure("Treeview.Heading", font=("Segoe UI", 8, "bold"))
 
     def _var(self, key, default):
         if key not in self.vars:
@@ -65,38 +68,39 @@ class NyxInterface:
         ttk.Label(parent, text=label).grid(row=row, column=col * 2,
             sticky="w", padx=(7, 5), pady=4)
         e = ttk.Entry(parent, textvariable=self._var(key, default), width=width)
-        e.grid(row=row, column=col * 2 + 1, sticky="ew", padx=(0, 9), pady=4)
+        e.grid(row=row, column=col * 2 + 1, sticky="ew", padx=(0, 9), pady=3)
         return e
 
     @staticmethod
     def _group(parent, title):
-        return ttk.LabelFrame(parent, text=title, padding=9)
+        return ttk.LabelFrame(parent, text=title, padding=7)
 
     def _build(self):
-        header = ttk.Frame(self.root, padding=(16, 12))
+        header = ttk.Frame(self.root, padding=(14, 8))
         header.pack(fill="x")
-        ttk.Label(header, text="NYX", font=("Segoe UI", 27, "bold"),
-                  foreground=ACCENT).pack(side="left")
-        ttk.Label(header, text="RESEARCH WORKBENCH  /  LIGHT-SAIL DYNAMICS",
-                  foreground=MUTED).pack(side="left", padx=14, pady=(9, 0))
+        ttk.Label(header, text="NYX", font=("Segoe UI", 21, "bold"), foreground=ACCENT).pack(side="left")
+        ttk.Label(header, text="RESEARCH WORKBENCH  /  LIGHT-SAIL DYNAMICS", foreground=MUTED, font=SMALL_FONT).pack(side="left", padx=12, pady=(6, 0))
         self.status_var = tk.StringVar()
         ttk.Label(header, textvariable=self.status_var, foreground=MUTED).pack(
             side="right", pady=(9, 0))
 
         self.tabs = ttk.Notebook(self.root)
         self.tabs.pack(fill="both", expand=True, padx=12, pady=(0, 8))
-        self.config_tab = ttk.Frame(self.tabs, padding=10)
-        self.sweep_tab = ttk.Frame(self.tabs, padding=10)
-        self.results_tab = ttk.Frame(self.tabs, padding=10)
-        self.steps_tab = ttk.Frame(self.tabs, padding=10)
+        self.config_tab = ttk.Frame(self.tabs, padding=8)
+        self.sweep_tab = ttk.Frame(self.tabs, padding=8)
+        self.results_tab = ttk.Frame(self.tabs, padding=8)
+        self.steps_tab = ttk.Frame(self.tabs, padding=8)
+        self.visualization_tab = ttk.Frame(self.tabs, padding=8)
         self.tabs.add(self.config_tab, text="  Configuration  ")
         self.tabs.add(self.sweep_tab, text="  Parameter sweep  ")
         self.tabs.add(self.results_tab, text="  Results & visualisation  ")
         self.tabs.add(self.steps_tab, text="  Simulation steps  ")
+        self.tabs.add(self.visualization_tab, text="  Sail visualisation  ")
         self._build_config()
         self._build_sweep()
         self._build_results()
         self._build_steps()
+        self._build_visualization()
 
         footer = ttk.Frame(self.root, padding=(12, 4, 12, 12))
         footer.pack(fill="x")
@@ -118,9 +122,7 @@ class NyxInterface:
             self.geometry_vars[name] = v
             ttk.Checkbutton(box, text=name, variable=v).grid(
                 row=0, column=i, sticky="w", padx=8, pady=3)
-        ttk.Label(box, text="Hemisphere is treated as an open hemispherical shell.",
-                  foreground=MUTED).grid(row=1, column=0, columnspan=3,
-                                         sticky="w", padx=8, pady=4)
+        ttk.Label(box, text="Hemisphere is treated as an open hemispherical shell.", foreground=MUTED).grid(row=1, column=0, columnspan=3, sticky="w", padx=8, pady=4)
 
         box = self._group(left, "Materials — select any combination")
         box.pack(fill="x", pady=(0, 9))
@@ -170,36 +172,26 @@ class NyxInterface:
         self._entry(box, "Number of steps", "steps", "10", 0, 0)
         self._entry(box, "Timestep (s per step)", "dt", "0.01", 1, 0)
         self._entry(box, "Maximum run count", "max_runs", "500", 2, 0)
-        ttk.Label(box, text="Simulated duration = number of steps × timestep.",
-                  foreground=MUTED).grid(row=3, column=0, columnspan=2,
-                                         sticky="w", padx=7, pady=5)
+        ttk.Label(box, text="Simulated duration = number of steps × timestep.", foreground=MUTED).grid(row=3, column=0, columnspan=2, sticky="w", padx=7, pady=5)
 
         row = ttk.Frame(right)
         row.pack(fill="x", pady=5)
-        ttk.Button(row, text="Run selected configurations",
-                   command=lambda: self._dispatch(self.on_run, "run")).pack(side="left")
+        ttk.Button(row, text="Run selected configurations", command=lambda: self._dispatch(self.on_run, "run")).pack(side="left")
         ttk.Button(row, text="Reset defaults", command=self.reset_defaults).pack(
             side="left", padx=8)
 
-        box = self._group(right, "Workflow")
-        box.pack(fill="both", expand=True)
-        ttk.Label(box, justify="left", wraplength=490, foreground=MUTED,
-            text=("This file is the interface only. It does not contain or import "
-                  "the physics engine. Connect your existing simulator through the "
-                  "callbacks to run experiments, update the results table and export data.")
-        ).pack(anchor="nw", padx=6, pady=5)
 
     def _build_sweep(self):
         box = self._group(self.sweep_tab, "Cartesian parameter sweep")
         box.pack(fill="x", pady=(0, 10))
         ttk.Label(box, justify="left", foreground=MUTED, text=(
             "Enter one parameter per line: name = comma-separated values. Angles are degrees; other values use SI units.\n"
-            "Supported: width, height, radius, a, thickness, resolution, theta_x, theta_y, beam_x, beam_y, I0, w0, lambdaLaser\n"
-            "Example: 3 tilt values × 3 beam offsets = 9 combinations per geometry–material pair."
+            "Supported: width, height, radius, a, thickness, resolution, theta_x, theta_y, beam_x, beam_y, I0, w0, lambdaLaser, steps, dt\n"
+            "Example: 3 tilkt values × 3 beam offsets = 9 combinations per geometry–material pair."
         )).pack(anchor="w", pady=(0, 8))
         self.sweep_text = tk.Text(box, height=12, bg=PANEL, fg=TEXT,
-            insertbackground="white", relief="flat", font=("Consolas", 10),
-            padx=8, pady=8)
+            insertbackground="white", relief="flat", font=("Consolas", 9),
+            padx=7, pady=6)
         self.sweep_text.pack(fill="x")
         self.sweep_text.insert("1.0", "# Lines beginning with # are ignored\ntheta_x = 0, 15, 30\nbeam_x = 0, 0.25, 0.5\n")
         row = ttk.Frame(box)
@@ -263,10 +255,126 @@ class NyxInterface:
         self.canvas = FigureCanvasTkAgg(self.figure, master=right)
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
         self.details = tk.Text(right, height=5, bg=PANEL, fg=TEXT,
-            insertbackground="white", relief="flat", font=("Consolas", 9), padx=8, pady=6)
+            insertbackground="white", relief="flat", font=("Consolas", 8), padx=7, pady=5)
         self.details.pack(fill="x", pady=(7, 0))
         self.details.insert("1.0", "Select a run to show its parameters and summary.")
         self.details.configure(state="disabled")
+
+    def _build_visualization(self):
+        toolbar = ttk.Frame(self.visualization_tab)
+        toolbar.pack(fill="x", pady=(0, 7))
+        ttk.Label(toolbar, text="Run").pack(side="left")
+        self.visualization_run_var = tk.StringVar(value="Run a simulation to visualize the sail")
+        self.visualization_run_selector = ttk.Combobox(
+            toolbar,
+            textvariable=self.visualization_run_var,
+            state="readonly",
+            width=60,
+        )
+        self.visualization_run_selector.pack(side="left", padx=7)
+        self.visualization_run_selector.bind(
+            "<<ComboboxSelected>>", self._select_sail_visualization
+        )
+        self.visualization_figure = Figure(
+            figsize=(9, 6), dpi=100, tight_layout=True, facecolor=BG
+        )
+        self.visualization_axes = self.visualization_figure.add_subplot(
+            111, projection="3d"
+        )
+        self.visualization_axes.set_title("Sail visualisation will appear here")
+        self.visualization_canvas = FigureCanvasTkAgg(
+            self.visualization_figure, master=self.visualization_tab
+        )
+        self.visualization_canvas.get_tk_widget().pack(fill="both", expand=True)
+        self.visualization_results = []
+        self.visualization_colorbar = None
+
+    def show_sail_visualization(self, result):
+        self.visualization_results = getattr(self, "last_nyx_results", [])
+        labels = []
+        for index, run in enumerate(self.visualization_results, start=1):
+            parameters = run.get("parameters", {})
+            varying = ", ".join(
+                f"{key}={value}"
+                for key, value in parameters.items()
+                if key in {"theta_x", "theta_y", "beam_x", "beam_y", "steps", "dt"}
+            )
+            label = f"{index}: {run['geometry']} / {run['material']}"
+            labels.append(f"{label} ({varying})" if varying else label)
+
+        self.visualization_run_selector.configure(values=labels)
+        if labels:
+            index = self.visualization_results.index(result)
+            self.visualization_run_selector.current(index)
+        self._draw_sail_visualization(result)
+
+    def _select_sail_visualization(self, _event=None):
+        index = self.visualization_run_selector.current()
+        if 0 <= index < len(self.visualization_results):
+            self._draw_sail_visualization(self.visualization_results[index])
+
+    def _draw_sail_visualization(self, result):
+        data = result["visualization"]
+        axes = self.visualization_axes
+        axes.clear()
+        if self.visualization_colorbar is not None:
+            self.visualization_colorbar.remove()
+            self.visualization_colorbar = None
+
+        scatter = axes.scatter(
+            data["x"],
+            data["y"],
+            data["z"],
+            c=data["intensity"],
+            cmap="plasma",
+            s=24,
+        )
+        self.visualization_colorbar = self.visualization_figure.colorbar(
+            scatter, ax=axes, pad=0.1, label="Beam intensity (W/m²)"
+        )
+        self.visualization_colorbar.ax.yaxis.label.set_fontsize(8)
+        self.visualization_colorbar.ax.tick_params(colors=TEXT, labelsize=8)
+        self.visualization_colorbar.ax.yaxis.label.set_color(TEXT)
+
+        trajectory = np.asarray(data["trajectory"], dtype=float)
+        if trajectory.size:
+            axes.plot(
+                trajectory[:, 0],
+                trajectory[:, 1],
+                trajectory[:, 2],
+                color=ACCENT,
+                label="Sail trajectory",
+            )
+            axes.legend(facecolor=BG, edgecolor=MUTED, labelcolor=TEXT)
+
+        force = np.asarray(data["force"], dtype=float)
+        force_magnitude = np.linalg.norm(force)
+        if force_magnitude > 0:
+            axes.quiver(
+                0, 0, 0,
+                *(force / force_magnitude),
+                length=2,
+                normalize=True,
+                color="#ff6b6b",
+                label="Force direction",
+            )
+
+        axes.set_title(f"{result['geometry']} / {result['material']}")
+        axes.title.set_fontsize(10)
+        axes.set_xlabel("X (m)")
+        axes.set_ylabel("Y (m)")
+        axes.set_zlabel("Z (m)")
+        axes.xaxis.label.set_fontsize(8)
+        axes.yaxis.label.set_fontsize(8)
+        axes.zaxis.label.set_fontsize(8)
+        axes.set_box_aspect((1, 1, 1))
+        axes.view_init(elev=30, azim=45)
+        axes.tick_params(colors=TEXT, labelsize=8)
+        axes.xaxis.label.set_color(TEXT)
+        axes.yaxis.label.set_color(TEXT)
+        axes.zaxis.label.set_color(TEXT)
+        axes.title.set_color(TEXT)
+        self.visualization_canvas.draw_idle()
 
     def _build_steps(self):
         toolbar = ttk.Frame(self.steps_tab)
@@ -286,7 +394,7 @@ class NyxInterface:
             fg=TEXT,
             insertbackground=TEXT,
             relief="flat",
-            font=("Consolas", 10),
+            font=("Consolas", 9),
             wrap="none",
             state="disabled",
         )
@@ -446,10 +554,13 @@ class NyxInterface:
 
     def _style_plot_axes(self):
         self.axes.set_facecolor(PANEL)
-        self.axes.tick_params(colors=TEXT)
+        self.axes.tick_params(colors=TEXT, labelsize=8)
         self.axes.xaxis.label.set_color(TEXT)
         self.axes.yaxis.label.set_color(TEXT)
         self.axes.title.set_color(TEXT)
+        self.axes.xaxis.label.set_size(8)
+        self.axes.yaxis.label.set_size(8)
+        self.axes.title.set_size(10)
         for spine in self.axes.spines.values():
             spine.set_color(MUTED)
         self.axes.grid(True, color=MUTED, alpha=0.25)
