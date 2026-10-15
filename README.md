@@ -26,6 +26,35 @@
 | Paraboloid | Parabolic sail surface | Radius, shape coefficient `a`, thickness, resolution |
 
 The supplied material presets are convenient model inputs, not certified material datasets. Check the values in `materials/` before using them in a study, and record any changes when reporting results.
+## Video Demo
+
+
+https://github.com/user-attachments/assets/064bfee9-2f74-4de7-afba-e7603ab8d173
+
+https://github.com/user-attachments/assets/316d92d4-95de-4465-a724-811cc15903e7
+
+
+---
+
+## Screen Shots
+<img width="910" height="275" alt="Nyx1" src="https://github.com/user-attachments/assets/70676c2b-9d56-4858-ab47-b46864681d44" />
+<img width="910" height="275" alt="Nyx1" src="https://github.com/user-attachments/assets/b2dad62e-0a24-47e8-8085-e9beada8aac6" />
+<img width="546" height="341" alt="NyxTestCases1" src="https://github.com/user-attachments/assets/bd9e779d-c46a-4f93-a9d3-67ef6787ed8e" />
+<img width="546" height="341" alt="NyxTestCases1" src="https://github.com/user-attachments/assets/6afca7a6-cc04-4d94-a052-1d4ec2825465" />
+<img width="640" height="480" alt="NyxSemiSphereSail" src="https://github.com/user-attachments/assets/6b77c74e-ca2c-456a-a035-49a0a4b0c28f" />
+<img width="640" height="480" alt="NYXrectLightSailwithHeatmap" src="https://github.com/user-attachments/assets/0117c179-3031-4faf-bf40-812e8b73be7f" />
+<img width="640" height="480" alt="NyxSemiSphereSail" src="https://github.com/user-attachments/assets/3085c3b8-afd5-4328-a7ca-18badc411109" />
+<img width="640" height="480" alt="NYXwhatTHEhelDidIdobro" src="https://github.com/user-attachments/assets/8fdf7c15-6684-46d6-bf9c-2e5add242e37" />
+<img width="640" height="480" alt="NYXrectLightSailwithHeatmap" src="https://github.com/user-attachments/assets/2b519d42-83b2-417f-897d-5b6bf67cec24" />
+<img width="640" height="480" alt="NYXparaboloid1" src="https://github.com/user-attachments/assets/2b831ac5-ecd9-478a-b19b-c6cdb69e995d" />
+<img width="1092" height="562" alt="NYXist1secRECTsail" src="https://github.com/user-attachments/assets/89028b44-9c2f-4c3d-aee7-f9fb0d08a822" />
+<img width="640" height="480" alt="NYXparaboloid1" src="https://github.com/user-attachments/assets/ecaef203-6eac-4d1f-97a0-e6c3c3daa52a" />
+<img width="1092" height="562" alt="NYXist1secRECTsail" src="https://github.com/user-attachments/assets/14d82a59-b46b-4e95-a755-c33b056a76f4" />
+<img width="1349" height="696" alt="NyxGUI_1" src="https://github.com/user-attachments/assets/20c57230-938c-4573-b496-cdb076d5c504" />
+<img width="1178" height="571" alt="NyxGUI_2" src="https://github.com/user-attachments/assets/c9a1b078-7b74-4fc4-aed0-840d122da9ca" />
+<img width="1361" height="669" alt="NyxGUI_3" src="https://github.com/user-attachments/assets/180fe46e-0b2a-4c02-90cc-854804097bad" />
+
+
 
 ## Getting started
 
